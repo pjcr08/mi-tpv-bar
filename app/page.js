@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 
-// Productos de prueba por si Supabase está vacío o sin datos
+// Productos de prueba si Supabase está vacío o sin registros
 const PRODUCTOS_EJEMPLO = [
   { id: 101, nombre: 'Café Solo', precio: 1.20, familia: 'Cafés', destino: 'barra' },
   { id: 102, nombre: 'Café con Leche', precio: 1.40, familia: 'Cafés', destino: 'barra' },
@@ -37,7 +37,6 @@ export default function HomePrincipal() {
       const { data, error } = await supabase.from('productos').select('*')
 
       if (error || !data || data.length === 0) {
-        console.warn('Cargando productos por defecto (Supabase vacío o sin tabla)')
         usarProductosEjemplo()
         return
       }
@@ -51,8 +50,7 @@ export default function HomePrincipal() {
       } else {
         usarProductosEjemplo()
       }
-    } catch (err) {
-      console.error('Error de conexión a productos:', err)
+    } catch {
       usarProductosEjemplo()
     }
   }
@@ -134,10 +132,10 @@ export default function HomePrincipal() {
     try {
       const mesaId = await obtenerOCrearMesa()
 
-      // 1. Insertar pedido
+      // 1. Insertar pedido usando 'abierto' para cumplir con la constraint de la BD
       const { data: pedido, error: errPedido } = await supabase
         .from('pedidos')
-        .insert([{ mesa_id: mesaId, estado: 'pendiente' }])
+        .insert([{ mesa_id: mesaId, estado: 'abierto' }])
         .select()
         .single()
 
