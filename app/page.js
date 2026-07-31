@@ -1,8 +1,9 @@
 'use client'
+
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 
-// Productos de prueba por si Supabase aún no tiene registros creados
+// Productos de prueba si Supabase no tiene registros
 const PRODUCTOS_EJEMPLO = [
   { id: 101, nombre: 'Café Solo', precio: 1.20, familia: 'Cafés', destino: 'barra' },
   { id: 102, nombre: 'Café con Leche', precio: 1.40, familia: 'Cafés', destino: 'barra' },
@@ -19,7 +20,7 @@ export default function HomePrincipal() {
   const [familiaActiva, setFamiliaActiva] = useState('')
   const [productos, setProductos] = useState([])
   const [ticket, setTicket] = useState([])
-  
+
   // Selección de Mesa
   const [zonaActiva, setZonaActiva] = useState('Terraza')
   const [mesaNum, setMesaNum] = useState(1)
@@ -40,17 +41,18 @@ export default function HomePrincipal() {
         setFamilias(fams)
         if (fams.length > 0) setFamiliaActiva(fams[0])
       } else {
-        setProductos(PRODUCTOS_EJEMPLO)
-        const fams = [...new Set(PRODUCTOS_EJEMPLO.map((p) => p.familia))]
-        setFamilias(fams)
-        setFamiliaActiva(fams[0])
+        usarProductosEjemplo()
       }
     } catch {
-      setProductos(PRODUCTOS_EJEMPLO)
-      const fams = [...new Set(PRODUCTOS_EJEMPLO.map((p) => p.familia))]
-      setFamilias(fams)
-      setFamiliaActiva(fams[0])
+      usarProductosEjemplo()
     }
+  }
+
+  const usarProductosEjemplo = () => {
+    setProductos(PRODUCTOS_EJEMPLO)
+    const fams = [...new Set(PRODUCTOS_EJEMPLO.map((p) => p.familia))]
+    setFamilias(fams)
+    setFamiliaActiva(fams[0])
   }
 
   const agregarAlTicket = (prod) => {
@@ -62,7 +64,7 @@ export default function HomePrincipal() {
         ticket.map((item) =>
           item.id === prod.id
             ? { ...item, cantidad: item.cantidad + cantAgregar }
-            : { ...item }
+            : item
         )
       )
     } else {
@@ -94,12 +96,9 @@ export default function HomePrincipal() {
     }
   }
 
-  // --- NUEVA FUNCIÓN: ENVIAR COMANDA A COCINA/BARRA ---
-  const enviarComanda = async () => {
-    if (ticket.length === 0) return
-
+  // Obtiene el ID de la mesa existente o la inserta si no existe en Supabase
+  const obtenerO CrearMesa = async () => {
     try {
-      // 1. Obtener o verificar la mesa
       const { data: mesaBD } = await supabase
         .from('mesas')
         .select('id')
@@ -107,30 +106,57 @@ export default function HomePrincipal() {
         .eq('zona', zonaActiva)
         .maybeSingle()
 
-      const mesaId = mesaBD ? mesaBD.id : 1
+      if (mesaBD) return mesaBD.id
 
-      // 2. Crear pedido en estado 'pendiente'
+      // Si la mesa no existe en la BD, la creamos
+      const { data: nuevaMesa } = await supabase
+        .from('mesas')
+        .insert([{ numero: mesaNum, zona: zonaActiva }])
+        .select()
+        .single()
+
+      return nuevaMesa ? nuevaMesa.id : null
+    } catch {
+      return null
+    }
+  }
+
+  // ENVIAR COMANDA A COCINA/BARRA
+  const enviarComanda = async () => {
+    if (ticket.length === 0) return
+
+    try {
+      const mesaId = await obtenerO CrearMesa()
+
+      // 1. Crear el pedido
       const { data: pedido, error: errPedido } = await supabase
         .from('pedidos')
         .insert([{ mesa_id: mesaId, estado: 'pendiente' }])
         .select()
         .single()
 
-      if (errPedido) throw errPedido
+      if (errPedido) {
+        alert(`Error al crear pedido: ${errPedido.message}`)
+        return
+      }
 
+      // 2. Crear las líneas de pedido
       if (pedido) {
-        // 3. Crear líneas del pedido en estado 'pendiente'
         const lineas = ticket.map((item) => ({
           pedido_id: pedido.id,
           producto_nombre: item.nombre,
           precio: item.precio,
           cantidad: item.cantidad,
           destino: item.destino || 'barra',
-          estado: 'pendiente', // IMPORTANTE: Para que aparezca en barra y cocina
+          estado: 'pendiente',
         }))
 
         const { error: errLineas } = await supabase.from('lineas_pedido').insert(lineas)
-        if (errLineas) throw errLineas
+
+        if (errLineas) {
+          alert(`Error en líneas de pedido: ${errLineas.message}`)
+          return
+        }
       }
 
       setTicket([])
@@ -138,32 +164,26 @@ export default function HomePrincipal() {
       alert('📝 ¡Comanda enviada a Cocina/Barra!')
     } catch (err) {
       console.error(err)
-      alert('Error al enviar la comanda a la base de datos.')
+      alert('Error inesperado al enviar la comanda.')
     }
   }
 
+  // COBRAR E IMPRIMIR TICKET
   const cobrarEImprimir = async () => {
     if (ticket.length === 0) return
 
     try {
       window.print()
 
-      const { data: mesaBD } = await supabase
-        .from('mesas')
-        .select('id')
-        .eq('numero', mesaNum)
-        .eq('zona', zonaActiva)
-        .maybeSingle()
+      const mesaId = await obtenerO CrearMesa()
 
-      const mesaId = mesaBD ? mesaBD.id : 1
-
-      const { data: pedido } = await supabase
+      const { data: pedido, error: errPedido } = await supabase
         .from('pedidos')
         .insert([{ mesa_id: mesaId, estado: 'cobrado' }])
         .select()
         .single()
 
-      if (pedido) {
+      if (pedido && !errPedido) {
         const lineas = ticket.map((item) => ({
           pedido_id: pedido.id,
           producto_nombre: item.nombre,
@@ -172,13 +192,15 @@ export default function HomePrincipal() {
           destino: item.destino || 'barra',
           estado: 'cobrado',
         }))
+
         await supabase.from('lineas_pedido').insert(lineas)
       }
 
       setTicket([])
       setMultiplicador(1)
       alert('¡Cobro realizado con éxito!')
-    } catch {
+    } catch (err) {
+      console.error(err)
       setTicket([])
       setMultiplicador(1)
       alert('Cobro registrado localmente')
@@ -271,169 +293,4 @@ export default function HomePrincipal() {
                 {ticket.map((item) => (
                   <div
                     key={item.id}
-                    className="flex justify-between items-center text-sm border-b border-slate-800/40 pb-1"
-                  >
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => cambiarCantidadItem(item.id, -1)}
-                        className="w-5 h-5 bg-red-900 hover:bg-red-700 rounded text-xs font-black flex items-center justify-center text-white"
-                      >
-                        -
-                      </button>
-                      <button
-                        onClick={() => cambiarCantidadItem(item.id, 1)}
-                        className="w-5 h-5 bg-emerald-900 hover:bg-emerald-700 rounded text-xs font-black flex items-center justify-center text-white"
-                      >
-                        +
-                      </button>
-                      <span className="font-medium text-slate-200">
-                        {item.nombre}
-                      </span>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-amber-400 font-black mr-2">
-                        {item.cantidad}x
-                      </span>
-                      <span className="font-bold">
-                        {(Number(item.precio) * item.cantidad).toFixed(2)}€
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* TECLADO NUMÉRICO Y BOTONES ACCIÓN */}
-          <div className="grid grid-cols-4 gap-2 border-t border-slate-800 pt-2">
-            <div className="col-span-4 bg-slate-950 p-2 rounded-lg border border-slate-800 flex justify-between items-center px-3">
-              <span className="text-xs text-slate-400 font-bold">UNIDADES / MULTIPLICADOR:</span>
-              <span className="text-lg font-black text-amber-400">{multiplicador}x</span>
-            </div>
-
-            {[1, 2, 3, 'C', 4, 5, 6, 0, 7, 8, 9].map((val) => (
-              <button
-                key={val}
-                onClick={() => presionarTeclado(val)}
-                className={`p-2.5 rounded-lg font-black text-lg transition active:scale-95 ${
-                  val === 'C'
-                    ? 'bg-rose-900/80 text-rose-200 border border-rose-700 hover:bg-rose-800'
-                    : 'bg-slate-800 text-white border border-slate-700 hover:bg-slate-700'
-                }`}
-              >
-                {val}
-              </button>
-            ))}
-
-            <div className="col-span-1 bg-amber-500/10 border border-amber-500/30 rounded-lg flex flex-col justify-center items-center p-1 text-center">
-              <span className="text-[10px] text-amber-400 font-bold uppercase">Total</span>
-              <span className="text-lg font-black text-amber-400">
-                {calcularTotal().toFixed(2)}€
-              </span>
-            </div>
-
-            {/* BOTÓN 1: ENVIAR COMANDA A COCINA Y BARRA */}
-            <button
-              onClick={enviarComanda}
-              disabled={ticket.length === 0}
-              className="col-span-4 mt-1 py-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-30 disabled:cursor-not-allowed text-white font-black text-base rounded-xl uppercase transition shadow-lg flex items-center justify-center gap-2"
-            >
-              📝 ENVIAR COMANDA (COCINA / BARRA)
-            </button>
-
-            {/* BOTÓN 2: COBRAR E IMPRIMIR */}
-            <button
-              onClick={cobrarEImprimir}
-              disabled={ticket.length === 0}
-              className="col-span-4 py-3 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-30 disabled:cursor-not-allowed text-slate-950 font-black text-base rounded-xl uppercase transition shadow-lg flex items-center justify-center gap-2"
-            >
-              💳 COBRAR E IMPRIMIR ({calcularTotal().toFixed(2)}€)
-            </button>
-          </div>
-        </div>
-
-        {/* PANEL DERECHO: FAMILIAS Y PRODUCTOS TÁCTILES */}
-        <div className="w-full lg:w-7/12 p-3 flex flex-col justify-between bg-slate-950">
-          
-          {/* Botones de Familias */}
-          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-1.5 mb-3">
-            {familias.map((f, idx) => {
-              const colores = [
-                'bg-blue-600 border-blue-500',
-                'bg-emerald-600 border-emerald-500',
-                'bg-purple-600 border-purple-500',
-                'bg-amber-600 border-amber-500',
-                'bg-rose-600 border-rose-500',
-                'bg-indigo-600 border-indigo-500',
-              ]
-              const estiloColor = colores[idx % colores.length]
-              const esActiva = familiaActiva === f
-
-              return (
-                <button
-                  key={f}
-                  onClick={() => setFamiliaActiva(f)}
-                  className={`p-2.5 rounded-xl font-black text-xs uppercase border transition shadow-md truncate ${estiloColor} ${
-                    esActiva
-                      ? 'ring-2 ring-white scale-[1.02] opacity-100'
-                      : 'opacity-70 hover:opacity-100'
-                  }`}
-                >
-                  {f}
-                </button>
-              )
-            })}
-          </div>
-
-          {/* Cuadrícula de Productos */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 overflow-y-auto max-h-[78vh] pr-1 flex-1">
-            {productosFiltrados.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => agregarAlTicket(p)}
-                className="p-3.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-amber-500/50 rounded-2xl text-left flex flex-col justify-between h-28 active:scale-95 transition shadow-lg group"
-              >
-                <span className="font-bold text-sm leading-snug text-slate-200 group-hover:text-amber-400 transition">
-                  {p.nombre}
-                </span>
-                <div className="flex justify-between items-end border-t border-slate-800/80 pt-2">
-                  <span className="text-xs text-slate-500 uppercase font-semibold">
-                    {p.destino || 'Barra'}
-                  </span>
-                  <span className="text-amber-400 font-black text-base">
-                    {Number(p.precio).toFixed(2)}€
-                  </span>
-                </div>
-              </button>
-            ))}
-          </div>
-
-        </div>
-      </div>
-
-      {/* Ticket para impresión */}
-      <div id="ticket-print">
-        <h2 style={{ textAlign: 'center', margin: '0 0 10px 0' }}>TICKET DE COMPRA</h2>
-        <p>
-          <strong>Zona:</strong> {zonaActiva} | <strong>Mesa:</strong> {mesaNum}
-        </p>
-        <hr />
-        {ticket.map((item) => (
-          <div
-            key={item.id}
-            style={{ display: 'flex', justifyContent: 'space-between', margin: '4px 0' }}
-          >
-            <span>
-              {item.cantidad}x {item.nombre}
-            </span>
-            <span>{(Number(item.precio) * item.cantidad).toFixed(2)}€</span>
-          </div>
-        ))}
-        <hr />
-        <h3 style={{ textAlign: 'right', marginTop: '10px' }}>
-          TOTAL: {calcularTotal().toFixed(2)}€
-        </h3>
-      </div>
-    </>
-  )
-}
+                    className="flex justify-between items-center text-sm border
