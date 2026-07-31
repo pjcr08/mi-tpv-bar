@@ -1,122 +1,215 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { supabase } from '../../lib/supabase';
-
+import { supabase } from '../../lib/supabase'
 
 export default function CajaCentral() {
   const [mesasOcupadas, setMesasOcupadas] = useState([])
   const [mesaSeleccionada, setMesaSeleccionada] = useState(null)
+  const [pedidoActual, setPedidoActual] = useState(null)
   const [lineasTicket, setLineasTicket] = useState([])
+  const [cargando, setCargando] = useState(false)
 
   useEffect(() => {
     cargarMesasOcupadas()
   }, [])
 
   const cargarMesasOcupadas = async () => {
-    const { data } = await supabase.from('mesas').select('*').eq('estado', 'ocupada')
+    const { data, error } = await supabase
+      .from('mesas')
+      .select('*')
+      .eq('estado', 'ocupada')
+
+    if (error) console.error('Error al cargar mesas:', error)
     if (data) setMesasOcupadas(data)
   }
 
   const verDetalleMesa = async (mesa) => {
     setMesaSeleccionada(mesa)
-    
-    // Obtener pedido abierto
-    const { data: pedido } = await supabase
+    setCargando(true)
+
+    // Obtener pedido abierto junto con sus líneas en una sola consulta
+    const { data: pedido, error } = await supabase
       .from('pedidos')
-      .select('id')
+      .select(`
+        id,
+        lineas_pedido (
+          id,
+          producto_nombre,
+          precio,
+          cantidad
+        )
+      `)
       .eq('mesa_id', mesa.id)
       .eq('estado', 'abierto')
-      .single()
+      .maybeSingle()
+
+    if (error) {
+      console.error('Error al obtener el pedido:', error)
+      setCargando(false)
+      return
+    }
 
     if (pedido) {
-      const { data: lineas } = await supabase
-        .from('lineas_pedido')
-        .select('*')
-        .eq('pedido_id', pedido.id)
-
-      if (lineas) setLineasTicket(lineas)
+      setPedidoActual(pedido)
+      setLineasTicket(pedido.lineas_pedido || [])
+    } else {
+      setPedidoActual(null)
+      setLineasTicket([])
     }
+
+    setCargando(false)
   }
 
-  const calcularTotal = () => lineasTicket.reduce((acc, curr) => acc + Number(curr.precio), 0)
+  // Multiplica precio por cantidad
+  const calcularTotal = () => {
+    return lineasTicket.reduce((acc, curr) => {
+      const cantidad = curr.cantidad || 1
+      return acc + Number(curr.precio) * cantidad
+    }, 0)
+  }
 
   const cobrarEImprimir = async () => {
-    if (!mesaSeleccionada) return
+    if (!mesaSeleccionada || !pedidoActual) return
 
-    // 1. Mandar a imprimir ticket
-    window.print()
+    try {
+      setCargando(true)
 
-    // 2. Cerrar el pedido en la base de datos
-    const { data: pedido } = await supabase
-      .from('pedidos')
-      .select('id')
-      .eq('mesa_id', mesaSeleccionada.id)
-      .eq('estado', 'abierto')
-      .single()
+      // 1. Mandar a imprimir (Usa CSS @media print para formatear)
+      window.print()
 
-    if (pedido) {
-      await supabase.from('pedidos').update({ estado: 'cobrado' }).eq('id', pedido.id)
+      // 2. Marcar pedido como 'cobrado'
+      const { error: errorPedido } = await supabase
+        .from('pedidos')
+        .update({ estado: 'cobrado' })
+        .eq('id', pedidoActual.id)
+
+      if (errorPedido) throw errorPedido
+
+      // 3. Liberar la mesa
+      const { error: errorMesa } = await supabase
+        .from('mesas')
+        .update({ estado: 'libre' })
+        .eq('id', mesaSeleccionada.id)
+
+      if (errorMesa) throw errorMesa
+
+      // Limpiar estados y recargar
+      setMesaSeleccionada(null)
+      setPedidoActual(null)
+      setLineasTicket([])
+      await cargarMesasOcupadas()
+    } catch (err) {
+      console.error('Error durante el proceso de cobro:', err)
+      alert('Hubo un problema al procesar el cobro')
+    } finally {
+      setCargando(false)
     }
-
-    // 3. Liberar la mesa
-    await supabase.from('mesas').update({ estado: 'libre' }).eq('id', mesaSeleccionada.id)
-
-    // Resetear
-    setMesaSeleccionada(null)
-    setLineasTicket([])
-    cargarMesasOcupadas()
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 text-white p-6 flex flex-col md:flex-row gap-6">
-      {/* Lista de mesas activas */}
-      <div className="w-full md:w-1/2">
-        <h2 className="text-2xl font-bold mb-4 text-amber-500">Mesas con Cuenta Pendiente</h2>
-        <div className="grid grid-cols-2 gap-4">
-          {mesasOcupadas.map((m) => (
+    <>
+      {/* CSS para formatear la salida en impresoras de ticket de 80mm/58mm */}
+      <style jsx global>{`
+        @media print {
+          body * {
+            visibility: hidden;
+          }
+          #ticket-print, #ticket-print * {
+            visibility: visible;
+          }
+          #ticket-print {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 80mm;
+            color: black !important;
+            background: white !important;
+            padding: 10px;
+            font-family: monospace;
+          }
+          .no-print {
+            display: none !important;
+          }
+        }
+      `}</style>
+
+      <div className="min-h-screen bg-slate-900 text-white p-6 flex flex-col md:flex-row gap-6">
+        {/* Panel izquierdo: Selección de mesas */}
+        <div className="w-full md:w-1/2 no-print">
+          <h2 className="text-2xl font-bold mb-4 text-amber-500">
+            Mesas con Cuenta Pendiente
+          </h2>
+          <div className="grid grid-cols-2 gap-4">
+            {mesasOcupadas.map((m) => {
+              const esSeleccionada = mesaSeleccionada?.id === m.id
+              return (
+                <button
+                  key={m.id}
+                  onClick={() => verDetalleMesa(m)}
+                  className={`p-6 border rounded-2xl text-left font-extrabold text-xl transition ${
+                    esSeleccionada
+                      ? 'bg-amber-500 text-slate-950 border-amber-400'
+                      : 'bg-red-950/40 border-red-500 hover:bg-red-900/40 text-white'
+                  }`}
+                >
+                  Mesa {m.numero}
+                  <span className={`text-xs uppercase block ${esSeleccionada ? 'text-slate-800' : 'text-slate-400'}`}>
+                    {m.zona}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* Panel derecho / Ticket visual */}
+        <div className="w-full md:w-1/2 bg-slate-800 p-6 rounded-2xl flex flex-col justify-between">
+          {/* Este contenedor #ticket-print es el único que se imprimirá en papel */}
+          <div id="ticket-print">
+            <h3 className="text-xl font-bold border-b border-slate-700 pb-2 text-center md:text-left">
+              {mesaSeleccionada
+                ? `Ticket Mesa ${mesaSeleccionada.numero}`
+                : 'Selecciona una mesa'}
+            </h3>
+
+            <div className="my-4 space-y-2">
+              {cargando ? (
+                <p className="text-slate-400 text-sm">Cargando datos...</p>
+              ) : (
+                lineasTicket.map((item, idx) => {
+                  const cant = item.cantidad || 1
+                  const subtotal = (Number(item.precio) * cant).toFixed(2)
+                  return (
+                    <div key={idx} className="flex justify-between text-sm border-b border-slate-700/50 pb-1">
+                      <span>
+                        {cant > 1 && <strong className="mr-1">{cant}x</strong>}
+                        {item.producto_nombre}
+                      </span>
+                      <span className="font-semibold">{subtotal}€</span>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+
+            <div className="border-t border-slate-700 pt-4 flex justify-between text-2xl font-black text-amber-400 mb-4">
+              <span>TOTAL:</span>
+              <span>{calcularTotal().toFixed(2)}€</span>
+            </div>
+          </div>
+
+          {/* Botón de acción (oculto en la impresión) */}
+          <div className="no-print">
             <button
-              key={m.id}
-              onClick={() => verDetalleMesa(m)}
-              className="p-6 bg-red-950/40 border border-red-500 rounded-2xl text-left font-extrabold text-xl hover:bg-red-900/40"
+              onClick={cobrarEImprimir}
+              disabled={!mesaSeleccionada || cargando || lineasTicket.length === 0}
+              className="w-full py-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-black text-xl rounded-xl uppercase transition"
             >
-              Mesa {m.numero} <span className="text-xs uppercase block text-slate-400">{m.zona}</span>
+              💳 COBRAR E IMPRIMIR TICKET
             </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Visor e Impresión de Ticket */}
-      <div className="w-full md:w-1/2 bg-slate-800 p-6 rounded-2xl flex flex-col justify-between">
-        <div>
-          <h3 className="text-xl font-bold border-b border-slate-700 pb-2">
-            {mesaSeleccionada ? `Ticket Mesa ${mesaSeleccionada.numero}` : 'Selecciona una mesa'}
-          </h3>
-
-          <div className="my-4 space-y-2">
-            {lineasTicket.map((item, idx) => (
-              <div key={idx} className="flex justify-between text-sm">
-                <span>{item.producto_nombre}</span>
-                <span className="font-semibold">{item.precio}€</span>
-              </div>
-            ))}
           </div>
         </div>
-
-        <div>
-          <div className="border-t border-slate-700 pt-4 flex justify-between text-2xl font-black text-amber-400 mb-4">
-            <span>TOTAL:</span>
-            <span>{calcularTotal().toFixed(2)}€</span>
-          </div>
-
-          <button
-            onClick={cobrarEImprimir}
-            disabled={!mesaSeleccionada}
-            className="w-full py-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-black text-xl rounded-xl uppercase transition"
-          >
-            💳 COBRAR E IMPRIMIR TICKET
-          </button>
-        </div>
       </div>
-    </div>
+    </>
   )
 }
