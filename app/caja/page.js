@@ -1,33 +1,33 @@
-'use client'
-import { useState, useEffect } from 'react'
-import { supabase } from '../../lib/supabase'
+'use client';
+
+import { useState, useEffect } from 'react';
+import { supabase } from '@/lib/supabase';
 
 export default function CajaCentral() {
-  const [mesasOcupadas, setMesasOcupadas] = useState([])
-  const [mesaSeleccionada, setMesaSeleccionada] = useState(null)
-  const [pedidoActual, setPedidoActual] = useState(null)
-  const [lineasTicket, setLineasTicket] = useState([])
-  const [cargando, setCargando] = useState(false)
+  const [mesasOcupadas, setMesasOcupadas] = useState([]);
+  const [mesaSeleccionada, setMesaSeleccionada] = useState(null);
+  const [pedidoActual, setPedidoActual] = useState(null);
+  const [lineasTicket, setLineasTicket] = useState([]);
+  const [cargando, setCargando] = useState(false);
 
   useEffect(() => {
-    cargarMesasOcupadas()
-  }, [])
+    cargarMesasOcupadas();
+  }, []);
 
   const cargarMesasOcupadas = async () => {
     const { data, error } = await supabase
       .from('mesas')
       .select('*')
-      .eq('estado', 'ocupada')
+      .eq('estado', 'ocupada');
 
-    if (error) console.error('Error al cargar mesas:', error)
-    if (data) setMesasOcupadas(data)
-  }
+    if (error) console.error('Error al cargar mesas:', error);
+    if (data) setMesasOcupadas(data);
+  };
 
   const verDetalleMesa = async (mesa) => {
-    setMesaSeleccionada(mesa)
-    setCargando(true)
+    setMesaSeleccionada(mesa);
+    setCargando(true);
 
-    // Obtener pedido abierto junto con sus líneas en una sola consulta
     const { data: pedido, error } = await supabase
       .from('pedidos')
       .select(`
@@ -41,75 +41,74 @@ export default function CajaCentral() {
       `)
       .eq('mesa_id', mesa.id)
       .eq('estado', 'abierto')
-      .maybeSingle()
+      .maybeSingle();
 
     if (error) {
-      console.error('Error al obtener el pedido:', error)
-      setCargando(false)
-      return
+      console.error('Error al obtener el pedido:', error);
+      setCargando(false);
+      return;
     }
 
     if (pedido) {
-      setPedidoActual(pedido)
-      setLineasTicket(pedido.lineas_pedido || [])
+      setPedidoActual(pedido);
+      setLineasTicket(pedido.lineas_pedido || []);
     } else {
-      setPedidoActual(null)
-      setLineasTicket([])
+      setPedidoActual(null);
+      setLineasTicket([]);
     }
 
-    setCargando(false)
-  }
+    setCargando(false);
+  };
 
-  // Multiplica precio por cantidad
   const calcularTotal = () => {
     return lineasTicket.reduce((acc, curr) => {
-      const cantidad = curr.cantidad || 1
-      return acc + Number(curr.precio) * cantidad
-    }, 0)
-  }
+      const cantidad = curr.cantidad || 1;
+      return acc + Number(curr.precio) * cantidad;
+    }, 0);
+  };
 
   const cobrarEImprimir = async () => {
-    if (!mesaSeleccionada || !pedidoActual) return
+    if (!mesaSeleccionada || !pedidoActual) return;
 
     try {
-      setCargando(true)
+      setCargando(true);
 
-      // 1. Mandar a imprimir (Usa CSS @media print para formatear)
-      window.print()
+      // 1. Mandar a imprimir
+      window.print();
 
       // 2. Marcar pedido como 'cobrado'
       const { error: errorPedido } = await supabase
         .from('pedidos')
         .update({ estado: 'cobrado' })
-        .eq('id', pedidoActual.id)
+        .eq('id', pedidoActual.id);
 
-      if (errorPedido) throw errorPedido
+      if (errorPedido) throw errorPedido;
 
       // 3. Liberar la mesa
       const { error: errorMesa } = await supabase
         .from('mesas')
         .update({ estado: 'libre' })
-        .eq('id', mesaSeleccionada.id)
+        .eq('id', mesaSeleccionada.id);
 
-      if (errorMesa) throw errorMesa
+      if (errorMesa) throw errorMesa;
 
       // Limpiar estados y recargar
-      setMesaSeleccionada(null)
-      setPedidoActual(null)
-      setLineasTicket([])
-      await cargarMesasOcupadas()
+      setMesaSeleccionada(null);
+      setPedidoActual(null);
+      setLineasTicket([]);
+      await cargarMesasOcupadas();
     } catch (err) {
-      console.error('Error durante el proceso de cobro:', err)
-      alert('Hubo un problema al procesar el cobro')
+      console.error('Error durante el proceso de cobro:', err);
+      alert('Hubo un problema al procesar el cobro');
     } finally {
-      setCargando(false)
+      setCargando(false);
     }
-  }
+  };
 
   return (
     <>
-      {/* CSS para formatear la salida en impresoras de ticket de 80mm/58mm */}
-      <style jsx global>{`
+      {/* CSS estándar para impresión en impresoras térmicas */}
+      <style>{`
         @media print {
           body * {
             visibility: hidden;
@@ -141,7 +140,7 @@ export default function CajaCentral() {
           </h2>
           <div className="grid grid-cols-2 gap-4">
             {mesasOcupadas.map((m) => {
-              const esSeleccionada = mesaSeleccionada?.id === m.id
+              const esSeleccionada = mesaSeleccionada?.id === m.id;
               return (
                 <button
                   key={m.id}
@@ -157,14 +156,13 @@ export default function CajaCentral() {
                     {m.zona}
                   </span>
                 </button>
-              )
+              );
             })}
           </div>
         </div>
 
         {/* Panel derecho / Ticket visual */}
         <div className="w-full md:w-1/2 bg-slate-800 p-6 rounded-2xl flex flex-col justify-between">
-          {/* Este contenedor #ticket-print es el único que se imprimirá en papel */}
           <div id="ticket-print">
             <h3 className="text-xl font-bold border-b border-slate-700 pb-2 text-center md:text-left">
               {mesaSeleccionada
@@ -177,8 +175,8 @@ export default function CajaCentral() {
                 <p className="text-slate-400 text-sm">Cargando datos...</p>
               ) : (
                 lineasTicket.map((item, idx) => {
-                  const cant = item.cantidad || 1
-                  const subtotal = (Number(item.precio) * cant).toFixed(2)
+                  const cant = item.cantidad || 1;
+                  const subtotal = (Number(item.precio) * cant).toFixed(2);
                   return (
                     <div key={idx} className="flex justify-between text-sm border-b border-slate-700/50 pb-1">
                       <span>
@@ -187,7 +185,7 @@ export default function CajaCentral() {
                       </span>
                       <span className="font-semibold">{subtotal}€</span>
                     </div>
-                  )
+                  );
                 })
               )}
             </div>
@@ -198,7 +196,7 @@ export default function CajaCentral() {
             </div>
           </div>
 
-          {/* Botón de acción (oculto en la impresión) */}
+          {/* Botón de acción */}
           <div className="no-print">
             <button
               onClick={cobrarEImprimir}
@@ -211,5 +209,5 @@ export default function CajaCentral() {
         </div>
       </div>
     </>
-  )
+  );
 }
