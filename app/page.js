@@ -3,32 +3,34 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 
-// Productos de prueba con colores asignados al estilo TPV Clásico
+// Productos de prueba con imágenes e iconos táctiles al estilo del nuevo TPV
 const PRODUCTOS_EJEMPLO = [
   // CAFÉS
-  { id: 101, nombre: 'Café Solo', precio: 1.20, familia: 'Cafés', destino: 'barra', color: 'bg-amber-700 text-white' },
-  { id: 102, nombre: 'Café con Leche', precio: 1.40, familia: 'Cafés', destino: 'barra', color: 'bg-amber-600 text-white' },
-  { id: 103, nombre: 'Café Jorco Especial', precio: 2.20, familia: 'Cafés', destino: 'barra', color: 'bg-yellow-500 text-black' },
-  { id: 104, nombre: 'Cortado', precio: 1.30, familia: 'Cafés', destino: 'barra', color: 'bg-amber-800 text-white' },
-  { id: 105, nombre: 'Carajillo', precio: 2.00, familia: 'Cafés', destino: 'barra', color: 'bg-orange-700 text-white' },
-  
+  { id: 101, nombre: 'Café Solo', precio: 1.20, familia: 'Cafés', destino: 'barra', img: '☕' },
+  { id: 102, nombre: 'Café con Leche', precio: 1.40, familia: 'Cafés', destino: 'barra', img: '🥛' },
+  { id: 103, nombre: 'Jorco Especial', precio: 2.20, familia: 'Cafés', destino: 'barra', img: '⭐' },
+  { id: 104, nombre: 'Cortado', precio: 1.30, familia: 'Cafés', destino: 'barra', img: '☕' },
+  { id: 105, nombre: 'Carajillo', precio: 2.00, familia: 'Cafés', destino: 'barra', img: '🥃' },
+
   // BEBIDAS
-  { id: 106, nombre: 'Caña Doble', precio: 2.50, familia: 'Bebidas', destino: 'barra', color: 'bg-blue-600 text-white' },
-  { id: 107, nombre: 'Refresco Cola', precio: 2.20, familia: 'Bebidas', destino: 'barra', color: 'bg-red-600 text-white' },
-  { id: 108, nombre: 'Agua 50cl', precio: 1.50, familia: 'Bebidas', destino: 'barra', color: 'bg-cyan-500 text-black' },
-  { id: 109, nombre: 'Cerveza 1/3 Tercio', precio: 2.80, familia: 'Bebidas', destino: 'barra', color: 'bg-blue-700 text-white' },
-  { id: 110, nombre: 'Copa de Vino', precio: 3.00, familia: 'Bebidas', destino: 'barra', color: 'bg-purple-700 text-white' },
+  { id: 106, nombre: 'Caña Doble', precio: 2.50, familia: 'Bebidas', destino: 'barra', img: '🍺' },
+  { id: 107, nombre: 'Refresco Cola', precio: 2.20, familia: 'Bebidas', destino: 'barra', img: '🥤' },
+  { id: 108, nombre: 'Agua 50cl', precio: 1.50, familia: 'Bebidas', destino: 'barra', img: '💧' },
+  { id: 109, nombre: 'Tercio 1/3', precio: 2.80, familia: 'Bebidas', destino: 'barra', img: '🍾' },
+  { id: 110, nombre: 'Copa Vino', precio: 3.00, familia: 'Bebidas', destino: 'barra', img: '🍷' },
 
   // COMIDA
-  { id: 111, nombre: 'Bocadillo Jamón', precio: 4.50, familia: 'Comida', destino: 'cocina', color: 'bg-emerald-600 text-white' },
-  { id: 112, nombre: 'Ración Bravas', precio: 6.00, familia: 'Comida', destino: 'cocina', color: 'bg-red-500 text-white' },
-  { id: 113, nombre: 'Pincho Tortilla', precio: 3.50, familia: 'Comida', destino: 'cocina', color: 'bg-yellow-400 text-black' },
-  { id: 114, nombre: 'Hamburguesa Jorco', precio: 8.50, familia: 'Comida', destino: 'cocina', color: 'bg-emerald-700 text-white' },
+  { id: 111, nombre: 'Bocad. Jamón', precio: 4.50, familia: 'Comida', destino: 'cocina', img: '🥖' },
+  { id: 112, nombre: 'Ración Bravas', precio: 6.00, familia: 'Comida', destino: 'cocina', img: '🍟' },
+  { id: 113, nombre: 'Pincho Tortilla', precio: 3.50, familia: 'Comida', destino: 'cocina', img: '🍳' },
+  { id: 114, nombre: 'Burger Jorco', precio: 8.50, familia: 'Comida', destino: 'cocina', img: '🍔' },
+  { id: 115, nombre: 'Pizza Jamón', precio: 9.00, familia: 'Comida', destino: 'cocina', img: '🍕' },
+  { id: 116, nombre: 'Ensalada', precio: 5.50, familia: 'Comida', destino: 'cocina', img: '🥗' },
 
   // POSTRES
-  { id: 115, nombre: 'Tarta Queso', precio: 4.00, familia: 'Postres', destino: 'cocina', color: 'bg-pink-500 text-white' },
-  { id: 116, nombre: 'Flan Casero', precio: 3.50, familia: 'Postres', destino: 'cocina', color: 'bg-fuchsia-600 text-white' },
-  { id: 117, nombre: 'Helado 2 Bolas', precio: 3.00, familia: 'Postres', destino: 'cocina', color: 'bg-pink-400 text-black' },
+  { id: 117, nombre: 'Tarta Queso', precio: 4.00, familia: 'Postres', destino: 'cocina', img: '🍰' },
+  { id: 118, nombre: 'Flan Casero', precio: 3.50, familia: 'Postres', destino: 'cocina', img: '🍮' },
+  { id: 119, nombre: 'Helado 2 Bolas', precio: 3.00, familia: 'Postres', destino: 'cocina', img: '🍨' },
 ]
 
 export default function HomePrincipal() {
@@ -36,14 +38,14 @@ export default function HomePrincipal() {
   const [familiaActiva, setFamiliaActiva] = useState('')
   const [productos, setProductos] = useState([])
 
-  // Selección de Mesa
+  // ZONA Y MESAS (Ahora 1 a 20 para todas las zonas)
   const [zonaActiva, setZonaActiva] = useState('Terraza')
   const [mesaNum, setMesaNum] = useState(1)
 
-  // ESTADO DE TICKETS POR MESA
+  // ESTADO DE TICKETS PERSISTENTES POR MESA
   const [ticketsPorMesa, setTicketsPorMesa] = useState({})
 
-  // Teclado numérico / Unidades
+  // Multiplicador / Unidades
   const [multiplicador, setMultiplicador] = useState(1)
 
   const claveMesaActual = `${zonaActiva}-${mesaNum}`
@@ -148,17 +150,11 @@ export default function HomePrincipal() {
 
     try {
       const mesaId = await obtenerOCrearMesa()
-
-      const { data: pedido, error: errPedido } = await supabase
+      const { data: pedido } = await supabase
         .from('pedidos')
         .insert([{ mesa_id: mesaId, estado: 'abierto' }])
         .select()
         .single()
-
-      if (errPedido) {
-        alert(`❌ Error en Pedidos: ${errPedido.message}`)
-        return
-      }
 
       if (pedido) {
         const lineas = ticketActual.map((item) => ({
@@ -176,7 +172,7 @@ export default function HomePrincipal() {
       setMultiplicador(1)
       alert(`📝 Comanda enviada: ${zonaActiva} - Mesa ${mesaNum}`)
     } catch (err) {
-      alert(`❌ Error inesperado: ${err.message || 'Error de red'}`)
+      alert(`❌ Error al enviar comanda: ${err.message || 'Error de conexión'}`)
     }
   }
 
@@ -185,7 +181,6 @@ export default function HomePrincipal() {
 
     try {
       window.print()
-
       const mesaId = await obtenerOCrearMesa()
       const { data: pedido } = await supabase
         .from('pedidos')
@@ -210,7 +205,7 @@ export default function HomePrincipal() {
       delete copia[claveMesaActual]
       setTicketsPorMesa(copia)
       setMultiplicador(1)
-      alert('💳 Cobro realizado con éxito')
+      alert('💳 Cobro registrado y ticket emitido')
     } catch {
       const copia = { ...ticketsPorMesa }
       delete copia[claveMesaActual]
@@ -220,7 +215,7 @@ export default function HomePrincipal() {
   }
 
   const borrarTicketMesa = () => {
-    if (confirm(`¿Borrar productos de ${zonaActiva} - Mesa ${mesaNum}?`)) {
+    if (confirm(`¿Limpiar ticket de ${zonaActiva} - Mesa ${mesaNum}?`)) {
       const copia = { ...ticketsPorMesa }
       delete copia[claveMesaActual]
       setTicketsPorMesa(copia)
@@ -229,17 +224,8 @@ export default function HomePrincipal() {
 
   const productosFiltrados = productos.filter((p) => p.familia === familiaActiva)
 
-  const rangosZona = {
-    Terraza: { min: 1, max: 20 },
-    Salón: { min: 21, max: 40 },
-    Barra: { min: 41, max: 60 },
-  }
-
-  const opcionesMesas = []
-  const { min, max } = rangosZona[zonaActiva] || { min: 1, max: 20 }
-  for (let i = min; i <= max; i++) {
-    opcionesMesas.push(i)
-  }
+  // Generar mesas del 1 al 20 para la zona seleccionada
+  const opcionesMesas = Array.from({ length: 20 }, (_, i) => i + 1)
 
   return (
     <>
@@ -256,43 +242,48 @@ export default function HomePrincipal() {
         }
       `}</style>
 
-      <div className="h-screen bg-slate-200 text-slate-900 flex flex-col no-imprimir select-none font-sans overflow-hidden">
+      <div className="h-screen bg-slate-100 text-slate-800 flex flex-col no-imprimir select-none font-sans overflow-hidden">
         
-        {/* BARRA SUPERIOR DE ZONAS Y MESA */}
-        <header className="bg-slate-300 border-b border-slate-400 p-2 flex justify-between items-center shadow-sm">
-          <div className="flex gap-2 items-center">
-            <span className="font-black text-slate-800 text-lg mr-2">JORCO FUSIÓN TPV</span>
-            {['Terraza', 'Salón', 'Barra'].map((z) => (
-              <button
-                key={z}
-                onClick={() => {
-                  setZonaActiva(z)
-                  setMesaNum(rangosZona[z].min)
-                }}
-                className={`px-4 py-2 font-black rounded text-sm uppercase transition shadow ${
-                  zonaActiva === z
-                    ? 'bg-blue-600 text-white border-2 border-blue-800'
-                    : 'bg-white text-slate-800 border border-slate-400 hover:bg-slate-100'
-                }`}
-              >
-                {z}
-              </button>
-            ))}
+        {/* ENCABEZADO DE CONFIGURACIÓN Y MESA */}
+        <header className="bg-amber-500 border-b border-amber-600 px-3 py-1.5 flex justify-between items-center text-slate-900 shadow">
+          <div className="flex items-center gap-3">
+            <h1 className="font-black text-xl tracking-wide uppercase">JORCO FUSIÓN TPV</h1>
+            
+            {/* ZONAS */}
+            <div className="flex bg-amber-600/40 p-1 rounded-lg gap-1 border border-amber-700/30">
+              {['Terraza', 'Salón', 'Barra'].map((z) => (
+                <button
+                  key={z}
+                  onClick={() => {
+                    setZonaActiva(z)
+                    setMesaNum(1)
+                  }}
+                  className={`px-3 py-1 font-black text-xs rounded uppercase transition ${
+                    zonaActiva === z
+                      ? 'bg-slate-900 text-amber-400 shadow'
+                      : 'bg-amber-100/30 text-slate-900 hover:bg-amber-200'
+                  }`}
+                >
+                  {z}
+                </button>
+              ))}
+            </div>
           </div>
 
+          {/* SELECTOR DE MESA (1 A 20) */}
           <div className="flex items-center gap-2">
-            <span className="font-bold text-slate-700 text-sm">SELECCIÓN MESA:</span>
+            <span className="font-black text-xs uppercase">SELECCIONAR MESA:</span>
             <select
               value={mesaNum}
               onChange={(e) => setMesaNum(Number(e.target.value))}
-              className="bg-white text-blue-900 font-black px-4 py-2 rounded border-2 border-blue-600 text-lg shadow-sm"
+              className="bg-white text-slate-900 font-black px-3 py-1 rounded border-2 border-slate-900 text-base shadow"
             >
               {opcionesMesas.map((n) => {
                 const clave = `${zonaActiva}-${n}`
                 const tieneItems = ticketsPorMesa[clave] && ticketsPorMesa[clave].length > 0
                 return (
                   <option key={n} value={n}>
-                    Mesa {n} {tieneItems ? '🔴' : ''}
+                    Mesa {n} {tieneItems ? '🔴 (Abierta)' : ''}
                   </option>
                 )
               })}
@@ -300,71 +291,80 @@ export default function HomePrincipal() {
           </div>
         </header>
 
-        {/* ESTRUCTURA DE 3 COLUMNAS TPV CLÁSICO */}
+        {/* ESTRUCTURA TPV INDUSTRIAL */}
         <div className="flex-1 flex overflow-hidden p-2 gap-2">
           
-          {/* 1. COLUMNA IZQUIERDA: NUMÉRICO + TICKET */}
-          <div className="w-3/12 flex flex-col gap-2 bg-slate-300 p-2 rounded border border-slate-400">
-            {/* Teclado Numérico arriba */}
-            <div className="grid grid-cols-4 gap-1 bg-slate-400 p-1 rounded border border-slate-500">
+          {/* IZQUIERDA: TICKET + TECLADO */}
+          <div className="w-4/12 flex flex-col gap-2 bg-slate-200 p-2 rounded border border-slate-300">
+            {/* Visor de Ticket */}
+            <div className="flex-1 bg-white border border-slate-300 rounded p-2 overflow-y-auto flex flex-col justify-between shadow-inner">
+              <div>
+                <div className="flex justify-between font-black text-xs border-b border-slate-300 pb-1 mb-2 text-slate-500 uppercase">
+                  <span>Cant / Descripción</span>
+                  <span>Total</span>
+                </div>
+                {ticketActual.length === 0 ? (
+                  <div className="text-center text-slate-400 text-xs mt-10 italic">
+                    {zonaActiva} - Mesa {mesaNum} sin productos
+                  </div>
+                ) : (
+                  ticketActual.map((item) => (
+                    <div key={item.id} className="flex justify-between items-center text-sm border-b border-slate-100 py-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <button onClick={() => cambiarCantidadItem(item.id, -1)} className="w-5 h-5 bg-red-600 text-white font-black rounded text-xs">
+                          -
+                        </button>
+                        <button onClick={() => cambiarCantidadItem(item.id, 1)} className="w-5 h-5 bg-emerald-600 text-white font-black rounded text-xs">
+                          +
+                        </button>
+                        <span className="font-bold text-slate-800">{item.cantidad}x {item.nombre}</span>
+                      </div>
+                      <span className="font-black text-slate-900">{(Number(item.precio) * item.cantidad).toFixed(2)}€</span>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Total acumulado */}
+              <div className="bg-sky-100 border border-sky-300 p-2 rounded text-right mt-2">
+                <span className="text-xs font-bold text-sky-800 uppercase block">Total a pagar</span>
+                <span className="font-black text-2xl text-sky-950">{calcularTotal().toFixed(2)}€</span>
+              </div>
+            </div>
+
+            {/* Teclado Numérico */}
+            <div className="grid grid-cols-4 gap-1 bg-slate-300 p-1.5 rounded border border-slate-400">
               {[1, 2, 3, 'C', 4, 5, 6, 0, 7, 8, 9].map((val) => (
                 <button
                   key={val}
                   onClick={() => presionarTeclado(val)}
-                  className={`p-2 font-black text-base rounded shadow border border-slate-400 active:scale-95 ${
-                    val === 'C' ? 'bg-red-600 text-white' : 'bg-white text-slate-900'
+                  className={`p-2 font-black text-base rounded shadow border transition active:scale-95 ${
+                    val === 'C' ? 'bg-red-500 text-white border-red-700' : 'bg-white text-slate-800 border-slate-300 hover:bg-slate-50'
                   }`}
                 >
                   {val}
                 </button>
               ))}
-              <div className="bg-amber-300 border border-amber-500 flex items-center justify-center font-black text-slate-900 rounded">
-                {multiplicador}x
-              </div>
-            </div>
-
-            {/* Visor de Ticket */}
-            <div className="flex-1 bg-white border border-slate-400 rounded p-2 overflow-y-auto flex flex-col justify-between">
-              <div>
-                <div className="flex justify-between font-black text-xs border-b border-slate-300 pb-1 mb-2 text-slate-600 uppercase">
-                  <span>Cant/Prod</span>
-                  <span>Total</span>
-                </div>
-                {ticketActual.map((item) => (
-                  <div key={item.id} className="flex justify-between items-center text-sm border-b border-slate-100 py-1">
-                    <div className="flex items-center gap-1">
-                      <button onClick={() => cambiarCantidadItem(item.id, -1)} className="w-5 h-5 bg-red-500 text-white font-bold rounded">
-                        -
-                      </button>
-                      <button onClick={() => cambiarCantidadItem(item.id, 1)} className="w-5 h-5 bg-green-600 text-white font-bold rounded">
-                        +
-                      </button>
-                      <span className="font-semibold">{item.cantidad}x {item.nombre}</span>
-                    </div>
-                    <span className="font-black">{(Number(item.precio) * item.cantidad).toFixed(2)}€</span>
-                  </div>
-                ))}
-              </div>
-
-              {/* Total acumulado */}
-              <div className="bg-teal-700 text-white p-3 rounded text-right font-black text-xl border-t-2 border-teal-900 mt-2">
-                TOTAL: {calcularTotal().toFixed(2)}€
+              <div className="bg-amber-400 border border-amber-600 flex flex-col items-center justify-center font-black text-slate-900 rounded">
+                <span className="text-[9px] uppercase">Unid.</span>
+                <span className="text-base">{multiplicador}x</span>
               </div>
             </div>
           </div>
 
-          {/* 2. COLUMNA CENTRO: FAMILIAS + PRODUCTOS TÁCTILES */}
-          <div className="w-7/12 flex flex-col gap-2">
-            {/* Familias de Productos (Pestañas horizontales) */}
-            <div className="grid grid-cols-4 gap-1">
+          {/* CENTRO: FAMILIAS + GRILLA CON ICONOS/IMÁGENES */}
+          <div className="w-8/12 flex flex-col gap-2">
+            
+            {/* Pestañas de Familias */}
+            <div className="grid grid-cols-4 gap-1.5">
               {familias.map((f) => (
                 <button
                   key={f}
                   onClick={() => setFamiliaActiva(f)}
-                  className={`py-3 font-black text-sm uppercase rounded shadow border-2 transition ${
+                  className={`py-2.5 font-black text-xs uppercase rounded border-2 transition shadow ${
                     familiaActiva === f
-                      ? 'bg-blue-600 text-white border-blue-900 scale-[1.01]'
-                      : 'bg-slate-300 text-slate-800 border-slate-400 hover:bg-slate-100'
+                      ? 'bg-slate-900 text-amber-400 border-slate-950 scale-[1.01]'
+                      : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
                   }`}
                 >
                   {f}
@@ -372,68 +372,63 @@ export default function HomePrincipal() {
               ))}
             </div>
 
-            {/* Cuadrícula de Productos */}
-            <div className="flex-1 grid grid-cols-4 gap-2 bg-slate-300 p-2 rounded border border-slate-400 overflow-y-auto">
+            {/* Productos táctiles estilo TPV comercial */}
+            <div className="flex-1 grid grid-cols-4 gap-2 bg-slate-200 p-2 rounded border border-slate-300 overflow-y-auto">
               {productosFiltrados.map((p) => (
                 <button
                   key={p.id}
                   onClick={() => agregarAlTicket(p)}
-                  className={`p-3 rounded-lg border-2 border-slate-500 shadow-md font-bold flex flex-col justify-between h-24 text-left active:scale-95 transition ${
-                    p.color || 'bg-white text-slate-900'
-                  }`}
+                  className="bg-white hover:bg-amber-50 border-2 border-slate-300 hover:border-amber-400 rounded-xl p-2 flex flex-col justify-between h-24 shadow-sm active:scale-95 transition text-left group"
                 >
-                  <span className="text-sm leading-tight uppercase font-extrabold">{p.nombre}</span>
-                  <div className="flex justify-between items-end border-t border-black/20 pt-1 w-full">
-                    <span className="text-[10px] uppercase opacity-80">{p.destino}</span>
-                    <span className="text-lg font-black">{Number(p.precio).toFixed(2)}€</span>
+                  <div className="flex justify-between items-start w-full">
+                    <span className="font-extrabold text-xs text-slate-800 uppercase leading-snug line-clamp-2">
+                      {p.nombre}
+                    </span>
+                    <span className="text-xl">{p.img || '🍽️'}</span>
+                  </div>
+                  <div className="flex justify-between items-end border-t border-slate-100 pt-1 w-full">
+                    <span className="text-[10px] text-slate-400 font-bold uppercase">{p.destino}</span>
+                    <span className="text-base font-black text-amber-600">{Number(p.precio).toFixed(2)}€</span>
                   </div>
                 </button>
               ))}
             </div>
-          </div>
 
-          {/* 3. COLUMNA DERECHA: BOTONERA DE ACCIONES RÁPIDAS TPV */}
-          <div className="w-2/12 bg-slate-300 p-2 rounded border border-slate-400 flex flex-col gap-2">
-            <button
-              onClick={enviarComanda}
-              disabled={ticketActual.length === 0}
-              className="flex-1 bg-red-600 hover:bg-red-500 disabled:opacity-40 text-white font-black text-sm rounded border-2 border-red-800 shadow uppercase flex flex-col items-center justify-center p-2 text-center"
-            >
-              <span>📝 ENVIAR</span>
-              <span>COMANDA</span>
-            </button>
+            {/* BARRA INFERIOR DE ACCIONES RÁPIDAS (Estilo TPV Imagen) */}
+            <div className="grid grid-cols-4 gap-2">
+              <button
+                onClick={enviarComanda}
+                disabled={ticketActual.length === 0}
+                className="py-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-black text-xs uppercase rounded-lg border-b-4 border-blue-800 shadow"
+              >
+                📝 Enviar Comanda
+              </button>
 
-            <button
-              onClick={cobrarEImprimir}
-              disabled={ticketActual.length === 0}
-              className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-black text-sm rounded border-2 border-blue-800 shadow uppercase flex flex-col items-center justify-center p-2 text-center"
-            >
-              <span>💳 COBRAR E</span>
-              <span>IMPRIMIR</span>
-            </button>
+              <button
+                onClick={cobrarEImprimir}
+                disabled={ticketActual.length === 0}
+                className="py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-black text-xs uppercase rounded-lg border-b-4 border-emerald-800 shadow"
+              >
+                💳 Cobrar e Imprimir
+              </button>
 
-            <button
-              onClick={() => window.print()}
-              disabled={ticketActual.length === 0}
-              className="h-14 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-900 font-black text-xs rounded border-2 border-amber-700 shadow uppercase"
-            >
-              🖨️ PROFORMA
-            </button>
+              <button
+                onClick={() => window.print()}
+                disabled={ticketActual.length === 0}
+                className="py-3 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-900 font-black text-xs uppercase rounded-lg border-b-4 border-amber-700 shadow"
+              >
+                🖨️ Proforma
+              </button>
 
-            <button
-              onClick={borrarTicketMesa}
-              disabled={ticketActual.length === 0}
-              className="h-14 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-white font-black text-xs rounded border-2 border-gray-900 shadow uppercase"
-            >
-              🗑️ ANULAR MESA
-            </button>
+              <button
+                onClick={borrarTicketMesa}
+                disabled={ticketActual.length === 0}
+                className="py-3 bg-rose-600 hover:bg-rose-500 disabled:opacity-40 text-white font-black text-xs uppercase rounded-lg border-b-4 border-rose-800 shadow"
+              >
+                🗑️ Anular Mesa
+              </button>
+            </div>
 
-            <button
-              onClick={() => setMultiplicador(1)}
-              className="h-14 bg-pink-600 hover:bg-pink-500 text-white font-black text-xs rounded border-2 border-pink-800 shadow uppercase"
-            >
-              🔄 RESET UNIDADES
-            </button>
           </div>
 
         </div>
