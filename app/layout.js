@@ -1,14 +1,17 @@
-import './globals.css' // <-- ¡Aquí en la primera línea!
-
 export const metadata = {
   title: 'TPV Bar',
-  description: 'Sistema de gestión para bar',
 }
 
 export default function RootLayout({ children }) {
   return (
     <html lang="es">
-      <body>{children}</body>
+      <head>
+        {/* Carga Tailwind CSS directamente por CDN sin depender del compilador */}
+        <script src="https://cdn.tailwindcss.com"></script>
+      </head>
+      <body className="bg-slate-950 text-white min-h-screen">
+        {children}
+      </body>
     </html>
   )
 }
