@@ -40,7 +40,6 @@ export default function HomePrincipal() {
         setFamilias(fams)
         if (fams.length > 0) setFamiliaActiva(fams[0])
       } else {
-        // Si la tabla de Supabase está vacía, usa los datos de prueba
         setProductos(PRODUCTOS_EJEMPLO)
         const fams = [...new Set(PRODUCTOS_EJEMPLO.map((p) => p.familia))]
         setFamilias(fams)
@@ -63,7 +62,7 @@ export default function HomePrincipal() {
         ticket.map((item) =>
           item.id === prod.id
             ? { ...item, cantidad: item.cantidad + cantAgregar }
-            : item
+            : { ...item }
         )
       )
     } else {
@@ -95,6 +94,54 @@ export default function HomePrincipal() {
     }
   }
 
+  // --- NUEVA FUNCIÓN: ENVIAR COMANDA A COCINA/BARRA ---
+  const enviarComanda = async () => {
+    if (ticket.length === 0) return
+
+    try {
+      // 1. Obtener o verificar la mesa
+      const { data: mesaBD } = await supabase
+        .from('mesas')
+        .select('id')
+        .eq('numero', mesaNum)
+        .eq('zona', zonaActiva)
+        .maybeSingle()
+
+      const mesaId = mesaBD ? mesaBD.id : 1
+
+      // 2. Crear pedido en estado 'pendiente'
+      const { data: pedido, error: errPedido } = await supabase
+        .from('pedidos')
+        .insert([{ mesa_id: mesaId, estado: 'pendiente' }])
+        .select()
+        .single()
+
+      if (errPedido) throw errPedido
+
+      if (pedido) {
+        // 3. Crear líneas del pedido en estado 'pendiente'
+        const lineas = ticket.map((item) => ({
+          pedido_id: pedido.id,
+          producto_nombre: item.nombre,
+          precio: item.precio,
+          cantidad: item.cantidad,
+          destino: item.destino || 'barra',
+          estado: 'pendiente', // IMPORTANTE: Para que aparezca en barra y cocina
+        }))
+
+        const { error: errLineas } = await supabase.from('lineas_pedido').insert(lineas)
+        if (errLineas) throw errLineas
+      }
+
+      setTicket([])
+      setMultiplicador(1)
+      alert('📝 ¡Comanda enviada a Cocina/Barra!')
+    } catch (err) {
+      console.error(err)
+      alert('Error al enviar la comanda a la base de datos.')
+    }
+  }
+
   const cobrarEImprimir = async () => {
     if (ticket.length === 0) return
 
@@ -123,7 +170,7 @@ export default function HomePrincipal() {
           precio: item.precio,
           cantidad: item.cantidad,
           destino: item.destino || 'barra',
-          estado: 'sirviendo',
+          estado: 'cobrado',
         }))
         await supabase.from('lineas_pedido').insert(lineas)
       }
@@ -257,7 +304,7 @@ export default function HomePrincipal() {
             )}
           </div>
 
-          {/* TECLADO NUMÉRICO Y BOTÓN COBRAR */}
+          {/* TECLADO NUMÉRICO Y BOTONES ACCIÓN */}
           <div className="grid grid-cols-4 gap-2 border-t border-slate-800 pt-2">
             <div className="col-span-4 bg-slate-950 p-2 rounded-lg border border-slate-800 flex justify-between items-center px-3">
               <span className="text-xs text-slate-400 font-bold">UNIDADES / MULTIPLICADOR:</span>
@@ -285,10 +332,20 @@ export default function HomePrincipal() {
               </span>
             </div>
 
+            {/* BOTÓN 1: ENVIAR COMANDA A COCINA Y BARRA */}
+            <button
+              onClick={enviarComanda}
+              disabled={ticket.length === 0}
+              className="col-span-4 mt-1 py-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-30 disabled:cursor-not-allowed text-white font-black text-base rounded-xl uppercase transition shadow-lg flex items-center justify-center gap-2"
+            >
+              📝 ENVIAR COMANDA (COCINA / BARRA)
+            </button>
+
+            {/* BOTÓN 2: COBRAR E IMPRIMIR */}
             <button
               onClick={cobrarEImprimir}
               disabled={ticket.length === 0}
-              className="col-span-4 mt-1 py-3 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-30 disabled:cursor-not-allowed text-slate-950 font-black text-lg rounded-xl uppercase transition shadow-lg flex items-center justify-center gap-2"
+              className="col-span-4 py-3 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-30 disabled:cursor-not-allowed text-slate-950 font-black text-base rounded-xl uppercase transition shadow-lg flex items-center justify-center gap-2"
             >
               💳 COBRAR E IMPRIMIR ({calcularTotal().toFixed(2)}€)
             </button>
