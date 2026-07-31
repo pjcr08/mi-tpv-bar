@@ -78,27 +78,44 @@ export default function BarraPage() {
     };
   }, []);
 
-  // SOLUCIÓN: Marcar todas las líneas del pedido de golpe por pedido_id y destino
+  // 1. MARCAR COMO SERVIDO
   const marcarComandaCompleta = async (pedidoId) => {
-    try {
-      const { error } = await supabase
-        .from('lineas_pedido')
-        .update({ estado: 'servido' })
-        .eq('pedido_id', pedidoId)
-        .eq('destino', 'barra');
+    // Quitamos la comanda localmente de inmediato para que la pantalla responda al instante
+    setComandasAgrupadas((prev) => prev.filter((g) => g.pedido_id !== pedidoId));
 
-      if (error) {
-        console.error('Error actualizando comanda completa:', error.message);
-      } else {
-        // Actualizamos estado local inmediatamente para respuesta instantánea
-        setComandasAgrupadas((prev) => prev.filter((g) => g.pedido_id !== pedidoId));
-      }
-    } catch (err) {
-      console.error('Error en marcarComandaCompleta:', err);
+    const { error } = await supabase
+      .from('lineas_pedido')
+      .update({ estado: 'servido' })
+      .eq('pedido_id', pedidoId)
+      .eq('destino', 'barra');
+
+    if (error) {
+      console.error('Error en Supabase (revisa políticas RLS):', error.message);
+      // Si falla en BD, recargamos para no descuadrar
+      fetchComandasBarra();
     }
   };
 
-  const marcarItemListo = async (id) => {
+  // 2. BORRAR/CANCELAR COMANDA DE LA BASE DE DATOS
+  const borrarComanda = async (pedidoId) => {
+    if (!confirm('¿Seguro que quieres BORRAR esta comanda?')) return;
+
+    setComandasAgrupadas((prev) => prev.filter((g) => g.pedido_id !== pedidoId));
+
+    // Eliminar las líneas de pedido
+    const { error } = await supabase
+      .from('lineas_pedido')
+      .delete()
+      .eq('pedido_id', pedidoId)
+      .eq('destino', 'barra');
+
+    if (error) {
+      console.error('Error al borrar comanda:', error.message);
+      fetchComandasBarra();
+    }
+  };
+
+  const marcarItemListo = async (id, pedidoId) => {
     const { error } = await supabase
       .from('lineas_pedido')
       .update({ estado: 'servido' })
@@ -145,7 +162,7 @@ export default function BarraPage() {
                 background: '#1e1e1e',
                 display: 'flex',
                 flexDirection: 'column',
-                justify: 'space-between'
+                justifyContent: 'space-between'
               }}
             >
               <div>
@@ -164,7 +181,7 @@ export default function BarraPage() {
                       key={item.id} 
                       style={{ 
                         display: 'flex', 
-                        justify: 'space-between', 
+                        justifyContent: 'space-between', 
                         alignItems: 'center', 
                         padding: '8px 0', 
                         borderBottom: '1px dashed #333',
@@ -177,7 +194,7 @@ export default function BarraPage() {
                         {item.producto_nombre}
                       </span>
                       <button
-                        onClick={() => marcarItemListo(item.id)}
+                        onClick={() => marcarItemListo(item.id, grupo.pedido_id)}
                         style={{
                           backgroundColor: '#27ae60',
                           color: 'white',
@@ -195,23 +212,42 @@ export default function BarraPage() {
                 </ul>
               </div>
 
-              <button
-                onClick={() => marcarComandaCompleta(grupo.pedido_id)}
-                style={{
-                  width: '100%',
-                  padding: '14px',
-                  backgroundColor: '#27ae60',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '6px',
-                  fontWeight: 'bold',
-                  fontSize: '1.1rem',
-                  cursor: 'pointer',
-                  marginTop: '10px'
-                }}
-              >
-                ✔ SERVIR COMANDA COMPLETA
-              </button>
+              {/* BARRA DE ACCIONES CON BOTÓN DE SERVIR Y BOTÓN DE BORRAR */}
+              <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                <button
+                  onClick={() => marcarComandaCompleta(grupo.pedido_id)}
+                  style={{
+                    flex: 1,
+                    padding: '14px',
+                    backgroundColor: '#27ae60',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    fontWeight: 'bold',
+                    fontSize: '1rem',
+                    cursor: 'pointer'
+                  }}
+                >
+                  ✔ SERVIR
+                </button>
+
+                <button
+                  onClick={() => borrarComanda(grupo.pedido_id)}
+                  title="Borrar comanda"
+                  style={{
+                    padding: '14px',
+                    backgroundColor: '#e74c3c',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    fontWeight: 'bold',
+                    fontSize: '1rem',
+                    cursor: 'pointer'
+                  }}
+                >
+                  🗑️
+                </button>
+              </div>
             </div>
           ))}
         </div>
