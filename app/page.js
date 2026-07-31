@@ -3,30 +3,53 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 
-// Productos de prueba si Supabase está vacío o sin registros
+// Productos de prueba enriquecidos si Supabase está vacío o sin registros
 const PRODUCTOS_EJEMPLO = [
+  // CAFÉS
   { id: 101, nombre: 'Café Solo', precio: 1.20, familia: 'Cafés', destino: 'barra' },
   { id: 102, nombre: 'Café con Leche', precio: 1.40, familia: 'Cafés', destino: 'barra' },
-  { id: 103, nombre: 'Caña Doble', precio: 2.50, familia: 'Bebidas', destino: 'barra' },
-  { id: 104, nombre: 'Refresco Cola', precio: 2.20, familia: 'Bebidas', destino: 'barra' },
-  { id: 105, nombre: 'Agua 50cl', precio: 1.50, familia: 'Bebidas', destino: 'barra' },
-  { id: 106, nombre: 'Bocadillo Jamón', precio: 4.50, familia: 'Comida', destino: 'cocina' },
-  { id: 107, nombre: 'Ración Bravas', precio: 6.00, familia: 'Comida', destino: 'cocina' },
-  { id: 108, nombre: 'Tarta de Queso', precio: 4.00, familia: 'Postres', destino: 'cocina' },
+  { id: 103, nombre: 'Café Jorco Especial', precio: 2.20, familia: 'Cafés', destino: 'barra' },
+  { id: 104, nombre: 'Cortado', precio: 1.30, familia: 'Cafés', destino: 'barra' },
+  { id: 105, nombre: 'Carajillo', precio: 2.00, familia: 'Cafés', destino: 'barra' },
+  
+  // BEBIDAS
+  { id: 106, nombre: 'Caña Doble', precio: 2.50, familia: 'Bebidas', destino: 'barra' },
+  { id: 107, nombre: 'Refresco Cola', precio: 2.20, familia: 'Bebidas', destino: 'barra' },
+  { id: 108, nombre: 'Agua 50cl', precio: 1.50, familia: 'Bebidas', destino: 'barra' },
+  { id: 109, nombre: 'Cerveza 1/3 Tercio', precio: 2.80, familia: 'Bebidas', destino: 'barra' },
+  { id: 110, nombre: 'Copa de Vino', precio: 3.00, familia: 'Bebidas', destino: 'barra' },
+
+  // COMIDA
+  { id: 111, nombre: 'Bocadillo Jamón', precio: 4.50, familia: 'Comida', destino: 'cocina' },
+  { id: 112, nombre: 'Ración Bravas', precio: 6.00, familia: 'Comida', destino: 'cocina' },
+  { id: 113, nombre: 'Pincho de Tortilla', precio: 3.50, familia: 'Comida', destino: 'cocina' },
+  { id: 114, nombre: 'Hamburguesa Jorco', precio: 8.50, familia: 'Comida', destino: 'cocina' },
+
+  // POSTRES
+  { id: 115, nombre: 'Tarta de Queso', precio: 4.00, familia: 'Postres', destino: 'cocina' },
+  { id: 116, nombre: 'Flan Casero', precio: 3.50, familia: 'Postres', destino: 'cocina' },
+  { id: 117, nombre: 'Helado 2 Bolas', precio: 3.00, familia: 'Postres', destino: 'cocina' },
 ]
 
 export default function HomePrincipal() {
   const [familias, setFamilias] = useState([])
   const [familiaActiva, setFamiliaActiva] = useState('')
   const [productos, setProductos] = useState([])
-  const [ticket, setTicket] = useState([])
 
   // Selección de Mesa
   const [zonaActiva, setZonaActiva] = useState('Terraza')
   const [mesaNum, setMesaNum] = useState(1)
 
+  // ESTADO DE TICKETS POR MESA: { "Terraza-1": [ { id, nombre, precio, cantidad... } ], ... }
+  const [ticketsPorMesa, setTicketsPorMesa] = useState({})
+
   // Teclado numérico / Unidades
   const [multiplicador, setMultiplicador] = useState(1)
+
+  // Obtener la clave única de la mesa actual
+  const claveMesaActual = `${zonaActiva}-${mesaNum}`
+  // Ticket de la mesa actual
+  const ticketActual = ticketsPorMesa[claveMesaActual] || []
 
   useEffect(() => {
     cargarProductos()
@@ -62,43 +85,57 @@ export default function HomePrincipal() {
     setFamiliaActiva(fams[0])
   }
 
+  // --- CONTROL DEL TICKET CON PERSISTENCIA ---
   const agregarAlTicket = (prod) => {
     const cantAgregar = multiplicador > 0 ? multiplicador : 1
-    const existe = ticket.find((item) => item.id === prod.id)
+    const ticketExistente = ticketsPorMesa[claveMesaActual] || []
+    const existe = ticketExistente.find((item) => item.id === prod.id)
 
+    let nuevoTicket = []
     if (existe) {
-      setTicket(
-        ticket.map((item) =>
-          item.id === prod.id
-            ? { ...item, cantidad: item.cantidad + cantAgregar }
-            : item
-        )
+      nuevoTicket = ticketExistente.map((item) =>
+        item.id === prod.id
+          ? { ...item, cantidad: item.cantidad + cantAgregar }
+          : item
       )
     } else {
-      setTicket([...ticket, { ...prod, cantidad: cantAgregar }])
+      nuevoTicket = [...ticketExistente, { ...prod, cantidad: cantAgregar }]
     }
+
+    setTicketsPorMesa({
+      ...ticketsPorMesa,
+      [claveMesaActual]: nuevoTicket,
+    })
     setMultiplicador(1)
   }
 
   const cambiarCantidadItem = (id, delta) => {
-    setTicket(
-      ticket
-        .map((item) =>
-          item.id === id ? { ...item, cantidad: item.cantidad + delta } : item
-        )
-        .filter((item) => item.cantidad > 0)
-    )
+    const ticketExistente = ticketsPorMesa[claveMesaActual] || []
+    const nuevoTicket = ticketExistente
+      .map((item) =>
+        item.id === id ? { ...item, cantidad: item.cantidad + delta } : item
+      )
+      .filter((item) => item.cantidad > 0)
+
+    setTicketsPorMesa({
+      ...ticketsPorMesa,
+      [claveMesaActual]: nuevoTicket,
+    })
   }
 
   const calcularTotal = () => {
-    return ticket.reduce((sum, item) => sum + Number(item.precio) * item.cantidad, 0)
+    return ticketActual.reduce(
+      (sum, item) => sum + Number(item.precio) * item.cantidad,
+      0
+    )
   }
 
   const presionarTeclado = (num) => {
     if (num === 'C') {
       setMultiplicador(1)
     } else {
-      const nuevoVal = multiplicador === 1 ? String(num) : String(multiplicador) + String(num)
+      const nuevoVal =
+        multiplicador === 1 ? String(num) : String(multiplicador) + String(num)
       setMultiplicador(Number(nuevoVal))
     }
   }
@@ -127,12 +164,12 @@ export default function HomePrincipal() {
   }
 
   const enviarComanda = async () => {
-    if (ticket.length === 0) return
+    if (ticketActual.length === 0) return
 
     try {
       const mesaId = await obtenerOCrearMesa()
 
-      // 1. Insertar pedido usando 'abierto' para cumplir con la constraint de la BD
+      // 1. Insertar pedido usando 'abierto'
       const { data: pedido, error: errPedido } = await supabase
         .from('pedidos')
         .insert([{ mesa_id: mesaId, estado: 'abierto' }])
@@ -146,7 +183,7 @@ export default function HomePrincipal() {
 
       // 2. Insertar líneas de pedido
       if (pedido) {
-        const lineas = ticket.map((item) => ({
+        const lineas = ticketActual.map((item) => ({
           pedido_id: pedido.id,
           producto_nombre: item.nombre,
           precio: item.precio,
@@ -163,9 +200,9 @@ export default function HomePrincipal() {
         }
       }
 
-      setTicket([])
+      // Mantener comanda en pantalla para adiciones posteriores o resetear si prefieres
       setMultiplicador(1)
-      alert('📝 ¡Comanda enviada a Cocina/Barra!')
+      alert(`📝 ¡Comanda enviada a Cocina/Barra para ${zonaActiva} - Mesa ${mesaNum}!`)
     } catch (err) {
       console.error(err)
       alert(`❌ Error inesperado: ${err.message || 'Error de red'}`)
@@ -173,7 +210,7 @@ export default function HomePrincipal() {
   }
 
   const cobrarEImprimir = async () => {
-    if (ticket.length === 0) return
+    if (ticketActual.length === 0) return
 
     try {
       window.print()
@@ -187,7 +224,7 @@ export default function HomePrincipal() {
         .single()
 
       if (pedido && !errPedido) {
-        const lineas = ticket.map((item) => ({
+        const lineas = ticketActual.map((item) => ({
           pedido_id: pedido.id,
           producto_nombre: item.nombre,
           precio: item.precio,
@@ -199,12 +236,18 @@ export default function HomePrincipal() {
         await supabase.from('lineas_pedido').insert(lineas)
       }
 
-      setTicket([])
+      // Limpiar solo la comanda de la mesa cobrada
+      const copiaTickets = { ...ticketsPorMesa }
+      delete copiaTickets[claveMesaActual]
+      setTicketsPorMesa(copiaTickets)
+
       setMultiplicador(1)
-      alert('💳 ¡Cobro realizado con éxito!')
+      alert('💳 ¡Cobro realizado y mesa liberada con éxito!')
     } catch (err) {
       console.error(err)
-      setTicket([])
+      const copiaTickets = { ...ticketsPorMesa }
+      delete copiaTickets[claveMesaActual]
+      setTicketsPorMesa(copiaTickets)
       setMultiplicador(1)
       alert('Cobro registrado localmente')
     }
@@ -239,11 +282,22 @@ export default function HomePrincipal() {
         }
       `}</style>
 
-      <div className="min-h-screen bg-slate-950 text-white flex flex-col lg:flex-row h-screen overflow-hidden font-sans no-imprimir select-none">
+      {/* HEADER DE BRANDING */}
+      <header className="bg-slate-950 border-b border-amber-500/40 px-6 py-2.5 flex justify-between items-center no-imprimir select-none">
+        <h1 className="text-xl font-black text-amber-500 tracking-wider">
+          ☕ JORCO FUSIÓN
+        </h1>
+        <span className="text-xs text-slate-400 font-bold">
+          SISTEMA TPV DE BARRA
+        </span>
+      </header>
+
+      <div className="min-h-[calc(100vh-49px)] bg-slate-950 text-white flex flex-col lg:flex-row h-full overflow-hidden font-sans no-imprimir select-none">
         
         {/* PANEL IZQUIERDO: TICKET Y TECLADO */}
         <div className="w-full lg:w-5/12 bg-slate-900 border-r border-slate-800 flex flex-col justify-between p-3">
           
+          {/* SELECTOR DE ZONAS Y MESAS */}
           <div className="bg-slate-800 p-2.5 rounded-xl border border-slate-700 flex justify-between items-center mb-2">
             <div className="flex gap-1">
               {['Terraza', 'Salón', 'Barra'].map((z) => (
@@ -271,11 +325,15 @@ export default function HomePrincipal() {
                 onChange={(e) => setMesaNum(Number(e.target.value))}
                 className="bg-slate-950 text-amber-400 font-black px-3 py-1.5 rounded-lg border border-slate-700 text-base"
               >
-                {opcionesMesas.map((n) => (
-                  <option key={n} value={n}>
-                    Mesa {n}
-                  </option>
-                ))}
+                {opcionesMesas.map((n) => {
+                  const clave = `${zonaActiva}-${n}`
+                  const tieneItems = ticketsPorMesa[clave] && ticketsPorMesa[clave].length > 0
+                  return (
+                    <option key={n} value={n}>
+                      Mesa {n} {tieneItems ? '🔴' : ''}
+                    </option>
+                  )
+                })}
               </select>
             </div>
           </div>
@@ -287,13 +345,13 @@ export default function HomePrincipal() {
               <span>Cant / Total</span>
             </div>
 
-            {ticket.length === 0 ? (
+            {ticketActual.length === 0 ? (
               <div className="h-full flex items-center justify-center text-slate-600 text-xs italic py-8">
-                Selecciona productos a la derecha para añadir al ticket
+                Selecciona productos a la derecha para añadir a {zonaActiva} (Mesa {mesaNum})
               </div>
             ) : (
               <div className="space-y-1.5">
-                {ticket.map((item) => (
+                {ticketActual.map((item) => (
                   <div
                     key={item.id}
                     className="flex justify-between items-center text-sm border-b border-slate-800/40 pb-1"
@@ -360,7 +418,7 @@ export default function HomePrincipal() {
             {/* BOTÓN 1: ENVIAR COMANDA */}
             <button
               onClick={enviarComanda}
-              disabled={ticket.length === 0}
+              disabled={ticketActual.length === 0}
               className="col-span-4 mt-1 py-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-30 disabled:cursor-not-allowed text-white font-black text-base rounded-xl uppercase transition shadow-lg flex items-center justify-center gap-2"
             >
               📝 ENVIAR COMANDA (COCINA / BARRA)
@@ -369,7 +427,7 @@ export default function HomePrincipal() {
             {/* BOTÓN 2: COBRAR E IMPRIMIR */}
             <button
               onClick={cobrarEImprimir}
-              disabled={ticket.length === 0}
+              disabled={ticketActual.length === 0}
               className="col-span-4 py-3 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-30 disabled:cursor-not-allowed text-slate-950 font-black text-base rounded-xl uppercase transition shadow-lg flex items-center justify-center gap-2"
             >
               💳 COBRAR E IMPRIMIR ({calcularTotal().toFixed(2)}€)
@@ -438,15 +496,16 @@ export default function HomePrincipal() {
 
       {/* Ticket para impresión */}
       <div id="ticket-print">
-        <h2 style={{ textAlign: 'center', margin: '0 0 10px 0' }}>TICKET DE COMPRA</h2>
+        <h2 style={{ textAlign: 'center', margin: '0 0 5px 0' }}>JORCO FUSIÓN</h2>
+        <h3 style={{ textAlign: 'center', margin: '0 0 10px 0' }}>TICKET DE COMPRA</h3>
         <p>
           <strong>Zona:</strong> {zonaActiva} | <strong>Mesa:</strong> {mesaNum}
         </p>
         <hr />
-        {ticket.map((item) => (
+        {ticketActual.map((item) => (
           <div
             key={item.id}
-            style={{ display: 'flex', justifyContent: 'space-between', margin: '4px 0' }}
+            style={{ display: 'flex', justifyCont: 'space-between', margin: '4px 0' }}
           >
             <span>
               {item.cantidad}x {item.nombre}
