@@ -7,71 +7,70 @@ export default function CocinaPage() {
   const [comandasAgrupadas, setComandasAgrupadas] = useState([]);
   const [cargando, setCargando] = useState(true);
 
-  // Cargar y agrupar comandas por pedido y mesa
   const fetchComandasCocina = async () => {
     try {
-      const { data, error } = await supabase
+      // 1. Obtener todas las líneas pendientes de cocina
+      const { data: lineas, error: errLineas } = await supabase
         .from('lineas_pedido')
-        .select(`
-          id,
-          pedido_id,
-          producto_nombre,
-          cantidad,
-          destino,
-          estado,
-          created_at,
-          pedidos (
-            id,
-            mesa_id
-          )
-        `)
+        .select('*')
         .eq('destino', 'cocina')
         .eq('estado', 'pendiente')
         .order('created_at', { ascending: true });
 
-      if (error) {
-        console.error('Error cargando cocina:', error.message);
-      } else {
-        agruparPorPedido(data || []);
+      if (errLineas) {
+        console.error('Error lineas:', errLineas.message);
+        return;
       }
+
+      if (!lineas || lineas.length === 0) {
+        setComandasAgrupadas([]);
+        return;
+      }
+
+      // 2. Obtener los IDs de pedido únicos y consultar sus mesas
+      const pedidoIds = [...new Set(lineas.map((l) => l.pedido_id))];
+      const { data: pedidos } = await supabase
+        .from('pedidos')
+        .select('id, mesa_id')
+        .in('id', pedidoIds);
+
+      const mapaMesas = {};
+      pedidos?.forEach((p) => {
+        mapaMesas[p.id] = p.mesa_id;
+      });
+
+      // 3. Agrupar manualmente por pedido
+      const grupos = {};
+      lineas.forEach((linea) => {
+        const pId = linea.pedido_id;
+        if (!grupos[pId]) {
+          grupos[pId] = {
+            pedido_id: pId,
+            mesa: mapaMesas[pId] ? `Mesa ${mapaMesas[pId]}` : `Pedido #${pId}`,
+            hora: linea.created_at,
+            items: []
+          };
+        }
+        grupos[pId].items.push(linea);
+      });
+
+      setComandasAgrupadas(Object.values(grupos));
     } catch (err) {
-      console.error('Error:', err);
+      console.error('Error general:', err);
     } finally {
       setCargando(false);
     }
   };
 
-  // Función para agrupar las líneas de pedido individuales por Pedido/Mesa
-  const agruparPorPedido = (lineas) => {
-    const grupos = {};
-
-    lineas.forEach((linea) => {
-      const pId = linea.pedido_id;
-      if (!grupos[pId]) {
-        grupos[pId] = {
-          pedido_id: pId,
-          mesa: linea.pedidos?.mesa_id || `Mesa #${pId}`,
-          hora: linea.created_at,
-          items: []
-        };
-      }
-      grupos[pId].items.push(linea);
-    });
-
-    setComandasAgrupadas(Object.values(grupos));
-  };
-
   useEffect(() => {
     fetchComandasCocina();
 
-    // Sincronización en tiempo real
     const channel = supabase
       .channel('realtime_cocina')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'lineas_pedido' },
         () => {
-          // Recargamos para refrescar la lista agrupada completa con los datos de mesas
           fetchComandasCocina();
         }
       )
@@ -82,7 +81,6 @@ export default function CocinaPage() {
     };
   }, []);
 
-  // Marcar toda la comanda de la mesa como lista
   const marcarComandaCompleta = async (items) => {
     const ids = items.map((i) => i.id);
     const { error } = await supabase
@@ -92,12 +90,9 @@ export default function CocinaPage() {
 
     if (!error) {
       fetchComandasCocina();
-    } else {
-      console.error('Error al actualizar comanda:', error.message);
     }
   };
 
-  // Marcar un solo plato como listo
   const marcarItemListo = async (id) => {
     const { error } = await supabase
       .from('lineas_pedido')
@@ -149,7 +144,6 @@ export default function CocinaPage() {
               }}
             >
               <div>
-                {/* Cabecera del Ticket */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #333', paddingBottom: '10px', marginBottom: '12px' }}>
                   <span style={{ fontSize: '1.4rem', fontWeight: 'bold', color: '#e67e22' }}>
                     {grupo.mesa}
@@ -159,7 +153,6 @@ export default function CocinaPage() {
                   </span>
                 </div>
 
-                {/* Lista de Platos */}
                 <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 15px 0' }}>
                   {grupo.items.map((item) => (
                     <li 
@@ -180,7 +173,6 @@ export default function CocinaPage() {
                       </span>
                       <button
                         onClick={() => marcarItemListo(item.id)}
-                        title="Marcar plato individual"
                         style={{
                           backgroundColor: '#27ae60',
                           color: 'white',
@@ -198,7 +190,6 @@ export default function CocinaPage() {
                 </ul>
               </div>
 
-              {/* Botón para despachar toda la mesa */}
               <button
                 onClick={() => marcarComandaCompleta(grupo.items)}
                 style={{
