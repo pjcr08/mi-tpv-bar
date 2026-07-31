@@ -125,6 +125,7 @@ export default function HomePrincipal() {
     try {
       const mesaId = await obtenerOCrearMesa()
 
+      // 1. Crear Pedido
       const { data: pedido, error: errPedido } = await supabase
         .from('pedidos')
         .insert([{ mesa_id: mesaId, estado: 'pendiente' }])
@@ -132,10 +133,12 @@ export default function HomePrincipal() {
         .single()
 
       if (errPedido) {
-        alert(`Error al crear pedido: ${errPedido.message}`)
+        alert(`❌ Error al crear pedido: ${errPedido.message} (${errPedido.code || ''})`)
+        console.error('Error Pedido:', errPedido)
         return
       }
 
+      // 2. Crear Líneas de Pedido
       if (pedido) {
         const lineas = ticket.map((item) => ({
           pedido_id: pedido.id,
@@ -149,7 +152,8 @@ export default function HomePrincipal() {
         const { error: errLineas } = await supabase.from('lineas_pedido').insert(lineas)
 
         if (errLineas) {
-          alert(`Error en líneas de pedido: ${errLineas.message}`)
+          alert(`❌ Error en líneas de pedido: ${errLineas.message} (${errLineas.code || ''})`)
+          console.error('Error Lineas:', errLineas)
           return
         }
       }
@@ -159,7 +163,7 @@ export default function HomePrincipal() {
       alert('📝 ¡Comanda enviada a Cocina/Barra!')
     } catch (err) {
       console.error(err)
-      alert('Error inesperado al enviar la comanda.')
+      alert(`❌ Error inesperado: ${err.message || 'Error de conexión'}`)
     }
   }
 
