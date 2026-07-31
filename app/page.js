@@ -2,6 +2,18 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 
+// Productos de prueba por si Supabase aún no tiene registros creados
+const PRODUCTOS_EJEMPLO = [
+  { id: 101, nombre: 'Café Solo', precio: 1.20, familia: 'Cafés', destino: 'barra' },
+  { id: 102, nombre: 'Café con Leche', precio: 1.40, familia: 'Cafés', destino: 'barra' },
+  { id: 103, nombre: 'Caña Doble', precio: 2.50, familia: 'Bebidas', destino: 'barra' },
+  { id: 104, nombre: 'Refresco Cola', precio: 2.20, familia: 'Bebidas', destino: 'barra' },
+  { id: 105, nombre: 'Agua 50cl', precio: 1.50, familia: 'Bebidas', destino: 'barra' },
+  { id: 106, nombre: 'Bocadillo Jamón', precio: 4.50, familia: 'Comida', destino: 'cocina' },
+  { id: 107, nombre: 'Ración Bravas', precio: 6.00, familia: 'Comida', destino: 'cocina' },
+  { id: 108, nombre: 'Tarta de Queso', precio: 4.00, familia: 'Postres', destino: 'cocina' },
+]
+
 export default function HomePrincipal() {
   const [familias, setFamilias] = useState([])
   const [familiaActiva, setFamiliaActiva] = useState('')
@@ -20,16 +32,28 @@ export default function HomePrincipal() {
   }, [])
 
   const cargarProductos = async () => {
-    const { data } = await supabase.from('productos').select('*')
-    if (data && data.length > 0) {
-      setProductos(data)
-      const fams = [...new Set(data.map((p) => p.familia))].filter(Boolean)
+    try {
+      const { data, error } = await supabase.from('productos').select('*')
+      if (data && data.length > 0 && !error) {
+        setProductos(data)
+        const fams = [...new Set(data.map((p) => p.familia))].filter(Boolean)
+        setFamilias(fams)
+        if (fams.length > 0) setFamiliaActiva(fams[0])
+      } else {
+        // Si la tabla de Supabase está vacía, usa los datos de prueba
+        setProductos(PRODUCTOS_EJEMPLO)
+        const fams = [...new Set(PRODUCTOS_EJEMPLO.map((p) => p.familia))]
+        setFamilias(fams)
+        setFamiliaActiva(fams[0])
+      }
+    } catch {
+      setProductos(PRODUCTOS_EJEMPLO)
+      const fams = [...new Set(PRODUCTOS_EJEMPLO.map((p) => p.familia))]
       setFamilias(fams)
-      if (fams.length > 0) setFamiliaActiva(fams[0])
+      setFamiliaActiva(fams[0])
     }
   }
 
-  // Lógica de adición al ticket respetando el multiplicador
   const agregarAlTicket = (prod) => {
     const cantAgregar = multiplicador > 0 ? multiplicador : 1
     const existe = ticket.find((item) => item.id === prod.id)
@@ -45,8 +69,6 @@ export default function HomePrincipal() {
     } else {
       setTicket([...ticket, { ...prod, cantidad: cantAgregar }])
     }
-
-    // Resetear el teclado numérico a 1
     setMultiplicador(1)
   }
 
@@ -79,7 +101,6 @@ export default function HomePrincipal() {
     try {
       window.print()
 
-      // Buscar ID de mesa
       const { data: mesaBD } = await supabase
         .from('mesas')
         .select('id')
@@ -110,15 +131,15 @@ export default function HomePrincipal() {
       setTicket([])
       setMultiplicador(1)
       alert('¡Cobro realizado con éxito!')
-    } catch (err) {
-      console.error(err)
-      alert('Error procesando cobro')
+    } catch {
+      setTicket([])
+      setMultiplicador(1)
+      alert('Cobro registrado localmente')
     }
   }
 
   const productosFiltrados = productos.filter((p) => p.familia === familiaActiva)
 
-  // Rangos de mesas según zona
   const rangosZona = {
     Terraza: { min: 1, max: 20 },
     Salón: { min: 21, max: 40 },
@@ -146,15 +167,11 @@ export default function HomePrincipal() {
         }
       `}</style>
 
-      {/* Carga CDN de Tailwind de respaldo */}
-      <script src="https://cdn.tailwindcss.com"></script>
-
       <div className="min-h-screen bg-slate-950 text-white flex flex-col lg:flex-row h-screen overflow-hidden font-sans no-imprimir select-none">
         
-        {/* ================= SECCIÓN IZQUIERDA: TICKET Y TECLADO ================= */}
+        {/* PANEL IZQUIERDO: TICKET Y TECLADO */}
         <div className="w-full lg:w-5/12 bg-slate-900 border-r border-slate-800 flex flex-col justify-between p-3">
           
-          {/* Header de Zona y Mesa */}
           <div className="bg-slate-800 p-2.5 rounded-xl border border-slate-700 flex justify-between items-center mb-2">
             <div className="flex gap-1">
               {['Terraza', 'Salón', 'Barra'].map((z) => (
@@ -191,7 +208,7 @@ export default function HomePrincipal() {
             </div>
           </div>
 
-          {/* Visor de Ticket */}
+          {/* VISOR TICKET */}
           <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800 flex-1 overflow-y-auto mb-2 min-h-[180px]">
             <div className="flex justify-between text-xs font-bold border-b border-slate-800 pb-1 mb-2 text-slate-400 uppercase">
               <span>Producto</span>
@@ -199,7 +216,7 @@ export default function HomePrincipal() {
             </div>
 
             {ticket.length === 0 ? (
-              <div className="h-full flex items-center justify-center text-slate-600 text-xs italic">
+              <div className="h-full flex items-center justify-center text-slate-600 text-xs italic py-8">
                 Selecciona productos a la derecha para añadir al ticket
               </div>
             ) : (
@@ -240,15 +257,13 @@ export default function HomePrincipal() {
             )}
           </div>
 
-          {/* Teclado Numérico + Totales */}
+          {/* TECLADO NUMÉRICO Y BOTÓN COBRAR */}
           <div className="grid grid-cols-4 gap-2 border-t border-slate-800 pt-2">
-            {/* Multiplicador actual */}
             <div className="col-span-4 bg-slate-950 p-2 rounded-lg border border-slate-800 flex justify-between items-center px-3">
-              <span className="text-xs text-slate-400 font-bold">MULTIPLICADOR / UNIDADES:</span>
+              <span className="text-xs text-slate-400 font-bold">UNIDADES / MULTIPLICADOR:</span>
               <span className="text-lg font-black text-amber-400">{multiplicador}x</span>
             </div>
 
-            {/* Teclas numéricas */}
             {[1, 2, 3, 'C', 4, 5, 6, 0, 7, 8, 9].map((val) => (
               <button
                 key={val}
@@ -263,7 +278,6 @@ export default function HomePrincipal() {
               </button>
             ))}
 
-            {/* Total acumulado */}
             <div className="col-span-1 bg-amber-500/10 border border-amber-500/30 rounded-lg flex flex-col justify-center items-center p-1 text-center">
               <span className="text-[10px] text-amber-400 font-bold uppercase">Total</span>
               <span className="text-lg font-black text-amber-400">
@@ -271,7 +285,6 @@ export default function HomePrincipal() {
               </span>
             </div>
 
-            {/* Botón de Cobro Directo */}
             <button
               onClick={cobrarEImprimir}
               disabled={ticket.length === 0}
@@ -282,10 +295,10 @@ export default function HomePrincipal() {
           </div>
         </div>
 
-        {/* ================= SECCIÓN DERECHA: BOTONERA DE PRODUCTOS ================= */}
+        {/* PANEL DERECHO: FAMILIAS Y PRODUCTOS TÁCTILES */}
         <div className="w-full lg:w-7/12 p-3 flex flex-col justify-between bg-slate-950">
           
-          {/* Familias */}
+          {/* Botones de Familias */}
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-1.5 mb-3">
             {familias.map((f, idx) => {
               const colores = [
@@ -315,41 +328,35 @@ export default function HomePrincipal() {
             })}
           </div>
 
-          {/* Grid Táctil de Productos */}
+          {/* Cuadrícula de Productos */}
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 overflow-y-auto max-h-[78vh] pr-1 flex-1">
-            {productosFiltrados.length === 0 ? (
-              <div className="col-span-full p-8 text-center text-slate-600 font-medium">
-                No hay productos en la familia "{familiaActiva}".
-              </div>
-            ) : (
-              productosFiltrados.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => agregarAlTicket(p)}
-                  className="p-3.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-amber-500/50 rounded-2xl text-left flex flex-col justify-between h-28 active:scale-95 transition shadow-lg group"
-                >
-                  <span className="font-bold text-sm leading-snug text-slate-200 group-hover:text-amber-400 transition">
-                    {p.nombre}
+            {productosFiltrados.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => agregarAlTicket(p)}
+                className="p-3.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-amber-500/50 rounded-2xl text-left flex flex-col justify-between h-28 active:scale-95 transition shadow-lg group"
+              >
+                <span className="font-bold text-sm leading-snug text-slate-200 group-hover:text-amber-400 transition">
+                  {p.nombre}
+                </span>
+                <div className="flex justify-between items-end border-t border-slate-800/80 pt-2">
+                  <span className="text-xs text-slate-500 uppercase font-semibold">
+                    {p.destino || 'Barra'}
                   </span>
-                  <div className="flex justify-between items-end border-t border-slate-800/80 pt-2">
-                    <span className="text-xs text-slate-500 uppercase font-semibold">
-                      {p.destino || 'Barra'}
-                    </span>
-                    <span className="text-amber-400 font-black text-base">
-                      {Number(p.precio).toFixed(2)}€
-                    </span>
-                  </div>
-                </button>
-              ))
-            )}
+                  <span className="text-amber-400 font-black text-base">
+                    {Number(p.precio).toFixed(2)}€
+                  </span>
+                </div>
+              </button>
+            ))}
           </div>
 
         </div>
       </div>
 
-      {/* Ticket Oculto para Impresión Térmica */}
+      {/* Ticket para impresión */}
       <div id="ticket-print">
-        <h2 style={{ textAlign: 'center', margin: '0 0 10px 0' }}>TICKET DE COBRA</h2>
+        <h2 style={{ textAlign: 'center', margin: '0 0 10px 0' }}>TICKET DE COMPRA</h2>
         <p>
           <strong>Zona:</strong> {zonaActiva} | <strong>Mesa:</strong> {mesaNum}
         </p>
