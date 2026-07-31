@@ -1,3 +1,17 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Estilos de rescate por si Tailwind no compila en Vercel */
+body {
+  background-color: #020617 !important;
+  color: #ffffff !important;
+  font-family: system-ui, -apple-system, sans-serif;
+  margin: 0;
+  padding: 0;
+}
+
+select option {
+  background-color: #0f172a;
+  color: white;
+}
