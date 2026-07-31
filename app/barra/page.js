@@ -78,15 +78,23 @@ export default function BarraPage() {
     };
   }, []);
 
-  const marcarComandaCompleta = async (items) => {
-    const ids = items.map((i) => i.id);
-    const { error } = await supabase
-      .from('lineas_pedido')
-      .update({ estado: 'servido' })
-      .in('id', ids);
+  // SOLUCIÓN: Marcar todas las líneas del pedido de golpe por pedido_id y destino
+  const marcarComandaCompleta = async (pedidoId) => {
+    try {
+      const { error } = await supabase
+        .from('lineas_pedido')
+        .update({ estado: 'servido' })
+        .eq('pedido_id', pedidoId)
+        .eq('destino', 'barra');
 
-    if (!error) {
-      fetchComandasBarra();
+      if (error) {
+        console.error('Error actualizando comanda completa:', error.message);
+      } else {
+        // Actualizamos estado local inmediatamente para respuesta instantánea
+        setComandasAgrupadas((prev) => prev.filter((g) => g.pedido_id !== pedidoId));
+      }
+    } catch (err) {
+      console.error('Error en marcarComandaCompleta:', err);
     }
   };
 
@@ -188,7 +196,7 @@ export default function BarraPage() {
               </div>
 
               <button
-                onClick={() => marcarComandaCompleta(grupo.items)}
+                onClick={() => marcarComandaCompleta(grupo.pedido_id)}
                 style={{
                   width: '100%',
                   padding: '14px',
