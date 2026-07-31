@@ -7,57 +7,56 @@ export default function BarraPage() {
   const [comandasAgrupadas, setComandasAgrupadas] = useState([]);
   const [cargando, setCargando] = useState(true);
 
-  // Cargar y agrupar comandas por pedido y mesa
   const fetchComandasBarra = async () => {
     try {
-      const { data, error } = await supabase
+      const { data: lineas, error: errLineas } = await supabase
         .from('lineas_pedido')
-        .select(`
-          id,
-          pedido_id,
-          producto_nombre,
-          cantidad,
-          destino,
-          estado,
-          created_at,
-          pedidos (
-            id,
-            mesa_id
-          )
-        `)
+        .select('*')
         .eq('destino', 'barra')
         .eq('estado', 'pendiente')
         .order('created_at', { ascending: true });
 
-      if (error) {
-        console.error('Error cargando barra:', error.message);
-      } else {
-        agruparPorPedido(data || []);
+      if (errLineas) {
+        console.error('Error lineas:', errLineas.message);
+        return;
       }
+
+      if (!lineas || lineas.length === 0) {
+        setComandasAgrupadas([]);
+        return;
+      }
+
+      const pedidoIds = [...new Set(lineas.map((l) => l.pedido_id))];
+      const { data: pedidos } = await supabase
+        .from('pedidos')
+        .select('id, mesa_id')
+        .in('id', pedidoIds);
+
+      const mapaMesas = {};
+      pedidos?.forEach((p) => {
+        mapaMesas[p.id] = p.mesa_id;
+      });
+
+      const grupos = {};
+      lineas.forEach((linea) => {
+        const pId = linea.pedido_id;
+        if (!grupos[pId]) {
+          grupos[pId] = {
+            pedido_id: pId,
+            mesa: mapaMesas[pId] ? `Mesa ${mapaMesas[pId]}` : `Pedido #${pId}`,
+            hora: linea.created_at,
+            items: []
+          };
+        }
+        grupos[pId].items.push(linea);
+      });
+
+      setComandasAgrupadas(Object.values(grupos));
     } catch (err) {
-      console.error('Error:', err);
+      console.error('Error general:', err);
     } finally {
       setCargando(false);
     }
-  };
-
-  const agruparPorPedido = (lineas) => {
-    const grupos = {};
-
-    lineas.forEach((linea) => {
-      const pId = linea.pedido_id;
-      if (!grupos[pId]) {
-        grupos[pId] = {
-          pedido_id: pId,
-          mesa: linea.pedidos?.mesa_id || `Mesa #${pId}`,
-          hora: linea.created_at,
-          items: []
-        };
-      }
-      grupos[pId].items.push(linea);
-    });
-
-    setComandasAgrupadas(Object.values(grupos));
   };
 
   useEffect(() => {
@@ -88,8 +87,6 @@ export default function BarraPage() {
 
     if (!error) {
       fetchComandasBarra();
-    } else {
-      console.error('Error al actualizar comanda:', error.message);
     }
   };
 
@@ -144,7 +141,6 @@ export default function BarraPage() {
               }}
             >
               <div>
-                {/* Cabecera del Ticket */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #333', paddingBottom: '10px', marginBottom: '12px' }}>
                   <span style={{ fontSize: '1.4rem', fontWeight: 'bold', color: '#3498db' }}>
                     {grupo.mesa}
@@ -154,7 +150,6 @@ export default function BarraPage() {
                   </span>
                 </div>
 
-                {/* Lista de Bebidas */}
                 <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 15px 0' }}>
                   {grupo.items.map((item) => (
                     <li 
@@ -175,7 +170,6 @@ export default function BarraPage() {
                       </span>
                       <button
                         onClick={() => marcarItemListo(item.id)}
-                        title="Marcar bebida individual"
                         style={{
                           backgroundColor: '#27ae60',
                           color: 'white',
@@ -193,7 +187,6 @@ export default function BarraPage() {
                 </ul>
               </div>
 
-              {/* Botón para despachar toda la mesa */}
               <button
                 onClick={() => marcarComandaCompleta(grupo.items)}
                 style={{
