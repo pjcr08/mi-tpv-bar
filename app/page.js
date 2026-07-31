@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 
-// Productos de prueba si Supabase no tiene registros
+// Productos de prueba por si Supabase está vacío o sin datos
 const PRODUCTOS_EJEMPLO = [
   { id: 101, nombre: 'Café Solo', precio: 1.20, familia: 'Cafés', destino: 'barra' },
   { id: 102, nombre: 'Café con Leche', precio: 1.40, familia: 'Cafés', destino: 'barra' },
@@ -35,15 +35,24 @@ export default function HomePrincipal() {
   const cargarProductos = async () => {
     try {
       const { data, error } = await supabase.from('productos').select('*')
-      if (data && data.length > 0 && !error) {
-        setProductos(data)
-        const fams = [...new Set(data.map((p) => p.familia))].filter(Boolean)
+
+      if (error || !data || data.length === 0) {
+        console.warn('Cargando productos por defecto (Supabase vacío o sin tabla)')
+        usarProductosEjemplo()
+        return
+      }
+
+      setProductos(data)
+      const fams = [...new Set(data.map((p) => p.familia))].filter(Boolean)
+
+      if (fams.length > 0) {
         setFamilias(fams)
-        if (fams.length > 0) setFamiliaActiva(fams[0])
+        setFamiliaActiva(fams[0])
       } else {
         usarProductosEjemplo()
       }
-    } catch {
+    } catch (err) {
+      console.error('Error de conexión a productos:', err)
       usarProductosEjemplo()
     }
   }
@@ -125,7 +134,7 @@ export default function HomePrincipal() {
     try {
       const mesaId = await obtenerOCrearMesa()
 
-      // 1. Crear Pedido
+      // 1. Insertar pedido
       const { data: pedido, error: errPedido } = await supabase
         .from('pedidos')
         .insert([{ mesa_id: mesaId, estado: 'pendiente' }])
@@ -133,12 +142,11 @@ export default function HomePrincipal() {
         .single()
 
       if (errPedido) {
-        alert(`❌ Error al crear pedido: ${errPedido.message} (${errPedido.code || ''})`)
-        console.error('Error Pedido:', errPedido)
+        alert(`❌ Error en Pedidos: ${errPedido.message} (${errPedido.code || ''})`)
         return
       }
 
-      // 2. Crear Líneas de Pedido
+      // 2. Insertar líneas de pedido
       if (pedido) {
         const lineas = ticket.map((item) => ({
           pedido_id: pedido.id,
@@ -152,8 +160,7 @@ export default function HomePrincipal() {
         const { error: errLineas } = await supabase.from('lineas_pedido').insert(lineas)
 
         if (errLineas) {
-          alert(`❌ Error en líneas de pedido: ${errLineas.message} (${errLineas.code || ''})`)
-          console.error('Error Lineas:', errLineas)
+          alert(`❌ Error en Líneas: ${errLineas.message} (${errLineas.code || ''})`)
           return
         }
       }
@@ -163,7 +170,7 @@ export default function HomePrincipal() {
       alert('📝 ¡Comanda enviada a Cocina/Barra!')
     } catch (err) {
       console.error(err)
-      alert(`❌ Error inesperado: ${err.message || 'Error de conexión'}`)
+      alert(`❌ Error inesperado: ${err.message || 'Error de red'}`)
     }
   }
 
@@ -196,7 +203,7 @@ export default function HomePrincipal() {
 
       setTicket([])
       setMultiplicador(1)
-      alert('¡Cobro realizado con éxito!')
+      alert('💳 ¡Cobro realizado con éxito!')
     } catch (err) {
       console.error(err)
       setTicket([])
