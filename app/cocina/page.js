@@ -1,29 +1,27 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase';
 
 export default function CocinaPage() {
   const [comandas, setComandas] = useState([]);
   const [cargando, setCargando] = useState(true);
 
-  // Función para obtener las comandas de la cocina
   const fetchComandasCocina = async () => {
     try {
       const { data, error } = await supabase
         .from('lineas_pedido')
         .select('*')
         .eq('destino', 'cocina')
-        .eq('servido', false)
-        .order('creado_en', { ascending: true });
+        .eq('servido', false);
 
       if (error) {
-        console.error('Error cargando comandas de cocina:', error.message);
+        console.error('Error cargando cocina:', error.message);
       } else {
         setComandas(data || []);
       }
     } catch (err) {
-      console.error('Error inesperado:', err);
+      console.error('Error:', err);
     } finally {
       setCargando(false);
     }
@@ -32,15 +30,12 @@ export default function CocinaPage() {
   useEffect(() => {
     fetchComandasCocina();
 
-    // Suscripción Realtime a nuevas líneas de pedido
     const channel = supabase
       .channel('realtime_cocina')
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'lineas_pedido' },
         (payload) => {
-          console.log('Nuevo item recibido en realtime:', payload.new);
-          // Si el item recibido va destinado a la cocina y no está servido, lo añadimos
           if (payload.new.destino === 'cocina' && !payload.new.servido) {
             setComandas((prev) => [...prev, payload.new]);
           }
@@ -53,7 +48,6 @@ export default function CocinaPage() {
     };
   }, []);
 
-  // Marcar una comanda como lista/servida
   const marcarServido = async (id) => {
     const { error } = await supabase
       .from('lineas_pedido')
@@ -62,9 +56,15 @@ export default function CocinaPage() {
 
     if (!error) {
       setComandas((prev) => prev.filter((item) => item.id !== id));
-    } else {
-      console.error('Error al actualizar estado:', error.message);
     }
+  };
+
+  // Función para formatear la hora sin errores
+  const obtenerHora = (item) => {
+    const campoFecha = item.creado_en || item.created_at || item.fecha;
+    if (!campoFecha) return '---';
+    const d = new Date(campoFecha);
+    return isNaN(d.getTime()) ? '---' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
   return (
@@ -83,44 +83,48 @@ export default function CocinaPage() {
         <p>Cargando comandas...</p>
       ) : comandas.length === 0 ? (
         <div style={{ padding: '40px', textAlign: 'center', background: '#1e1e1e', borderRadius: '8px', border: '1px dashed #444' }}>
-          <h2>No hay comanda pendiente en cocina</h2>
-          <p style={{ color: '#888' }}>Envía un pedido marcado para cocina desde la pantalla principal para probar.</p>
+          <h2>No hay comandas pendientes en cocina</h2>
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '15px' }}>
-          {comandas.map((item) => (
-            <div key={item.id} style={{ border: '2px solid #e67e22', borderRadius: '8px', padding: '15px', background: '#1e1e1e' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #333', paddingBottom: '8px', marginBottom: '10px' }}>
-                <span style={{ fontWeight: 'bold', color: '#e67e22' }}>
-                  Mesa / Pedido: {item.pedido_id ? String(item.pedido_id).substring(0, 8) : 'S/N'}
-                </span>
-                <span style={{ fontSize: '0.8rem', color: '#aaa' }}>
-                  {new Date(item.creado_en).toLocaleTimeString([], { hour: '22-digit', minute: '2-digit' })}
-                </span>
-              </div>
-              
-              <p style={{ fontSize: '1.5rem', fontWeight: 'bold', margin: '15px 0' }}>
-                {item.cantidad}x {item.nombre_producto}
-              </p>
+          {comandas.map((item) => {
+            // Detección automática del nombre del producto
+            const nombrePlato = item.nombre_producto || item.producto || item.nombre || item.descripcion || 'Producto sin nombre';
 
-              <button
-                onClick={() => marcarServido(item.id)}
-                style={{
-                  width: '100%',
-                  padding: '12px',
-                  backgroundColor: '#27ae60',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '5px',
-                  fontWeight: 'bold',
-                  fontSize: '1rem',
-                  cursor: 'pointer'
-                }}
-              >
-                ✔ MARCAR LISTO
-              </button>
-            </div>
-          ))}
+            return (
+              <div key={item.id} style={{ border: '2px solid #e67e22', borderRadius: '8px', padding: '15px', background: '#1e1e1e' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #333', paddingBottom: '8px', marginBottom: '10px' }}>
+                  <span style={{ fontWeight: 'bold', color: '#e67e22' }}>
+                    Mesa / Pedido: {item.pedido_id ? String(item.pedido_id).substring(0, 8) : 'S/N'}
+                  </span>
+                  <span style={{ fontSize: '0.85rem', color: '#aaa' }}>
+                    {obtenerHora(item)}
+                  </span>
+                </div>
+                
+                <p style={{ fontSize: '1.5rem', fontWeight: 'bold', margin: '15px 0', color: '#fff' }}>
+                  {item.cantidad || 1}x {nombrePlato}
+                </p>
+
+                <button
+                  onClick={() => marcarServido(item.id)}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    backgroundColor: '#27ae60',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '5px',
+                    fontWeight: 'bold',
+                    fontSize: '1rem',
+                    cursor: 'pointer'
+                  }}
+                >
+                  ✔ MARCAR LISTO
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
