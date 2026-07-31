@@ -4,14 +4,27 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 
 export default function BarraPage() {
-  const [comandas, setComandas] = useState([]);
+  const [comandasAgrupadas, setComandasAgrupadas] = useState([]);
   const [cargando, setCargando] = useState(true);
 
+  // Cargar y agrupar comandas por pedido y mesa
   const fetchComandasBarra = async () => {
     try {
       const { data, error } = await supabase
         .from('lineas_pedido')
-        .select('*')
+        .select(`
+          id,
+          pedido_id,
+          producto_nombre,
+          cantidad,
+          destino,
+          estado,
+          created_at,
+          pedidos (
+            id,
+            mesa_id
+          )
+        `)
         .eq('destino', 'barra')
         .eq('estado', 'pendiente')
         .order('created_at', { ascending: true });
@@ -19,13 +32,32 @@ export default function BarraPage() {
       if (error) {
         console.error('Error cargando barra:', error.message);
       } else {
-        setComandas(data || []);
+        agruparPorPedido(data || []);
       }
     } catch (err) {
       console.error('Error:', err);
     } finally {
       setCargando(false);
     }
+  };
+
+  const agruparPorPedido = (lineas) => {
+    const grupos = {};
+
+    lineas.forEach((linea) => {
+      const pId = linea.pedido_id;
+      if (!grupos[pId]) {
+        grupos[pId] = {
+          pedido_id: pId,
+          mesa: linea.pedidos?.mesa_id || `Mesa #${pId}`,
+          hora: linea.created_at,
+          items: []
+        };
+      }
+      grupos[pId].items.push(linea);
+    });
+
+    setComandasAgrupadas(Object.values(grupos));
   };
 
   useEffect(() => {
@@ -35,11 +67,9 @@ export default function BarraPage() {
       .channel('realtime_barra')
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'lineas_pedido' },
-        (payload) => {
-          if (payload.new.destino === 'barra' && payload.new.estado === 'pendiente') {
-            setComandas((prev) => [...prev, payload.new]);
-          }
+        { event: '*', schema: 'public', table: 'lineas_pedido' },
+        () => {
+          fetchComandasBarra();
         }
       )
       .subscribe();
@@ -49,16 +79,28 @@ export default function BarraPage() {
     };
   }, []);
 
-  const marcarServido = async (id) => {
+  const marcarComandaCompleta = async (items) => {
+    const ids = items.map((i) => i.id);
+    const { error } = await supabase
+      .from('lineas_pedido')
+      .update({ estado: 'servido' })
+      .in('id', ids);
+
+    if (!error) {
+      fetchComandasBarra();
+    } else {
+      console.error('Error al actualizar comanda:', error.message);
+    }
+  };
+
+  const marcarItemListo = async (id) => {
     const { error } = await supabase
       .from('lineas_pedido')
       .update({ estado: 'servido' })
       .eq('id', id);
 
     if (!error) {
-      setComandas((prev) => prev.filter((item) => item.id !== id));
-    } else {
-      console.error('Error al actualizar estado:', error.message);
+      fetchComandasBarra();
     }
   };
 
@@ -71,10 +113,10 @@ export default function BarraPage() {
   return (
     <div style={{ padding: '20px', backgroundColor: '#121212', color: '#fff', minHeight: '100vh', fontFamily: 'sans-serif' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-        <h1 style={{ color: '#3498db', margin: 0 }}>🍹 COMANDAS DE BARRA</h1>
+        <h1 style={{ color: '#3498db', margin: 0, fontSize: '2rem' }}>🍹 COMANDAS DE BARRA</h1>
         <button 
           onClick={fetchComandasBarra}
-          style={{ padding: '8px 16px', backgroundColor: '#333', color: '#fff', border: '1px solid #555', borderRadius: '4px', cursor: 'pointer' }}
+          style={{ padding: '10px 18px', backgroundColor: '#333', color: '#fff', border: '1px solid #555', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
         >
           🔄 Recargar
         </button>
@@ -82,42 +124,92 @@ export default function BarraPage() {
 
       {cargando ? (
         <p>Cargando comandas...</p>
-      ) : comandas.length === 0 ? (
-        <div style={{ padding: '40px', textAlign: 'center', background: '#1e1e1e', borderRadius: '8px', border: '1px dashed #444' }}>
-          <h2>No hay bebidas pendientes en barra</h2>
+      ) : comandasAgrupadas.length === 0 ? (
+        <div style={{ padding: '50px', textAlign: 'center', background: '#1e1e1e', borderRadius: '8px', border: '1px dashed #444' }}>
+          <h2 style={{ color: '#aaa' }}>No hay bebidas pendientes en barra</h2>
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '15px' }}>
-          {comandas.map((item) => (
-            <div key={item.id} style={{ border: '2px solid #3498db', borderRadius: '8px', padding: '15px', background: '#1e1e1e' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #333', paddingBottom: '8px', marginBottom: '10px' }}>
-                <span style={{ fontWeight: 'bold', color: '#3498db' }}>
-                  Pedido ID: #{item.pedido_id}
-                </span>
-                <span style={{ fontSize: '0.85rem', color: '#aaa' }}>
-                  {obtenerHora(item.created_at)}
-                </span>
-              </div>
-              
-              <p style={{ fontSize: '1.5rem', fontWeight: 'bold', margin: '15px 0', color: '#fff' }}>
-                {item.cantidad || 1}x {item.producto_nombre}
-              </p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' }}>
+          {comandasAgrupadas.map((grupo) => (
+            <div 
+              key={grupo.pedido_id} 
+              style={{ 
+                border: '2px solid #3498db', 
+                borderRadius: '10px', 
+                padding: '16px', 
+                background: '#1e1e1e',
+                display: 'flex',
+                flexDirection: 'column',
+                justify: 'space-between'
+              }}
+            >
+              <div>
+                {/* Cabecera del Ticket */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #333', paddingBottom: '10px', marginBottom: '12px' }}>
+                  <span style={{ fontSize: '1.4rem', fontWeight: 'bold', color: '#3498db' }}>
+                    {grupo.mesa}
+                  </span>
+                  <span style={{ fontSize: '1rem', color: '#3498db', fontWeight: 'bold', background: '#2c2c2c', padding: '4px 8px', borderRadius: '4px' }}>
+                    🕒 {obtenerHora(grupo.hora)}
+                  </span>
+                </div>
 
+                {/* Lista de Bebidas */}
+                <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 15px 0' }}>
+                  {grupo.items.map((item) => (
+                    <li 
+                      key={item.id} 
+                      style={{ 
+                        display: 'flex', 
+                        justify: 'space-between', 
+                        alignItems: 'center', 
+                        padding: '8px 0', 
+                        borderBottom: '1px dashed #333',
+                        fontSize: '1.2rem',
+                        fontWeight: 'bold'
+                      }}
+                    >
+                      <span>
+                        <span style={{ color: '#3498db', marginRight: '8px' }}>{item.cantidad || 1}x</span>
+                        {item.producto_nombre}
+                      </span>
+                      <button
+                        onClick={() => marcarItemListo(item.id)}
+                        title="Marcar bebida individual"
+                        style={{
+                          backgroundColor: '#27ae60',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '4px',
+                          padding: '4px 8px',
+                          fontSize: '0.85rem',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        ✔
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {/* Botón para despachar toda la mesa */}
               <button
-                onClick={() => marcarServido(item.id)}
+                onClick={() => marcarComandaCompleta(grupo.items)}
                 style={{
                   width: '100%',
-                  padding: '12px',
+                  padding: '14px',
                   backgroundColor: '#27ae60',
                   color: 'white',
                   border: 'none',
-                  borderRadius: '5px',
+                  borderRadius: '6px',
                   fontWeight: 'bold',
-                  fontSize: '1rem',
-                  cursor: 'pointer'
+                  fontSize: '1.1rem',
+                  cursor: 'pointer',
+                  marginTop: '10px'
                 }}
               >
-                ✔ MARCAR SERVIDO
+                ✔ SERVIR COMANDA COMPLETA
               </button>
             </div>
           ))}
