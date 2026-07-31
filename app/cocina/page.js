@@ -27,26 +27,38 @@ export default function CocinaPage() {
         return;
       }
 
-      // 2. Obtener los IDs de pedido únicos y consultar sus mesas
+      // 2. Obtener los IDs de pedido únicos y consultar sus mesas con ZONA y NÚMERO
       const pedidoIds = [...new Set(lineas.map((l) => l.pedido_id))];
       const { data: pedidos } = await supabase
         .from('pedidos')
-        .select('id, mesa_id')
+        .select(`
+          id,
+          mesas (
+            numero,
+            zona
+          )
+        `)
         .in('id', pedidoIds);
 
+      // 3. Crear el mapa de nombres para las mesas
       const mapaMesas = {};
       pedidos?.forEach((p) => {
-        mapaMesas[p.id] = p.mesa_id;
+        if (p.mesas) {
+          const zona = p.mesas.zona ? p.mesas.zona.toUpperCase() : 'MESA';
+          mapaMesas[p.id] = `${zona} - Mesa ${p.mesas.numero}`;
+        } else {
+          mapaMesas[p.id] = `Pedido #${p.id}`;
+        }
       });
 
-      // 3. Agrupar manualmente por pedido
+      // 4. Agrupar por pedido
       const grupos = {};
       lineas.forEach((linea) => {
         const pId = linea.pedido_id;
         if (!grupos[pId]) {
           grupos[pId] = {
             pedido_id: pId,
-            mesa: mapaMesas[pId] ? `Mesa ${mapaMesas[pId]}` : `Pedido #${pId}`,
+            mesa: mapaMesas[pId] || `Pedido #${pId}`,
             hora: linea.created_at,
             items: []
           };
@@ -81,18 +93,42 @@ export default function CocinaPage() {
     };
   }, []);
 
-  const marcarComandaCompleta = async (items) => {
+  // 1. MARCAR COMANDA COMPLETA COMO LISTA
+  const marcarComandaCompleta = async (pedidoId, items) => {
+    // Quita la tarjeta localmente al instante
+    setComandasAgrupadas((prev) => prev.filter((g) => g.pedido_id !== pedidoId));
+
     const ids = items.map((i) => i.id);
     const { error } = await supabase
       .from('lineas_pedido')
       .update({ estado: 'listo' })
       .in('id', ids);
 
-    if (!error) {
+    if (error) {
+      console.error('Error en Supabase (revisa RLS):', error.message);
       fetchComandasCocina();
     }
   };
 
+  // 2. BORRAR/CANCELAR COMANDA DE LA BASE DE DATOS
+  const borrarComanda = async (pedidoId) => {
+    if (!confirm('¿Seguro que quieres BORRAR esta comanda de cocina?')) return;
+
+    setComandasAgrupadas((prev) => prev.filter((g) => g.pedido_id !== pedidoId));
+
+    const { error } = await supabase
+      .from('lineas_pedido')
+      .delete()
+      .eq('pedido_id', pedidoId)
+      .eq('destino', 'cocina');
+
+    if (error) {
+      console.error('Error al borrar comanda:', error.message);
+      fetchComandasCocina();
+    }
+  };
+
+  // 3. MARCAR UN SOLO ÍTEM COMO LISTO
   const marcarItemListo = async (id) => {
     const { error } = await supabase
       .from('lineas_pedido')
@@ -140,15 +176,15 @@ export default function CocinaPage() {
                 background: '#1e1e1e',
                 display: 'flex',
                 flexDirection: 'column',
-                justify: 'space-between'
+                justifyContent: 'space-between'
               }}
             >
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #333', paddingBottom: '10px', marginBottom: '12px' }}>
-                  <span style={{ fontSize: '1.4rem', fontWeight: 'bold', color: '#e67e22' }}>
+                  <span style={{ fontSize: '1.3rem', fontWeight: 'bold', color: '#e67e22' }}>
                     {grupo.mesa}
                   </span>
-                  <span style={{ fontSize: '1rem', color: '#f39c12', fontWeight: 'bold', background: '#2c2c2c', padding: '4px 8px', borderRadius: '4px' }}>
+                  <span style={{ fontSize: '0.9rem', color: '#f39c12', fontWeight: 'bold', background: '#2c2c2c', padding: '4px 8px', borderRadius: '4px' }}>
                     🕒 {obtenerHora(grupo.hora)}
                   </span>
                 </div>
@@ -159,11 +195,11 @@ export default function CocinaPage() {
                       key={item.id} 
                       style={{ 
                         display: 'flex', 
-                        justify: 'space-between', 
+                        justifyContent: 'space-between', 
                         alignItems: 'center', 
                         padding: '8px 0', 
                         borderBottom: '1px dashed #333',
-                        fontSize: '1.2rem',
+                        fontSize: '1.1rem',
                         fontWeight: 'bold'
                       }}
                     >
@@ -190,23 +226,42 @@ export default function CocinaPage() {
                 </ul>
               </div>
 
-              <button
-                onClick={() => marcarComandaCompleta(grupo.items)}
-                style={{
-                  width: '100%',
-                  padding: '14px',
-                  backgroundColor: '#27ae60',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '6px',
-                  fontWeight: 'bold',
-                  fontSize: '1.1rem',
-                  cursor: 'pointer',
-                  marginTop: '10px'
-                }}
-              >
-                ✔ COMANDA COMPLETA LISTA
-              </button>
+              {/* ACCIONES DE COCINA */}
+              <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                <button
+                  onClick={() => marcarComandaCompleta(grupo.pedido_id, grupo.items)}
+                  style={{
+                    flex: 1,
+                    padding: '14px',
+                    backgroundColor: '#27ae60',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    fontWeight: 'bold',
+                    fontSize: '0.95rem',
+                    cursor: 'pointer'
+                  }}
+                >
+                  ✔ LISTA COMPLETA
+                </button>
+
+                <button
+                  onClick={() => borrarComanda(grupo.pedido_id)}
+                  title="Borrar comanda"
+                  style={{
+                    padding: '14px',
+                    backgroundColor: '#e74c3c',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    fontWeight: 'bold',
+                    fontSize: '1rem',
+                    cursor: 'pointer'
+                  }}
+                >
+                  🗑️
+                </button>
+              </div>
             </div>
           ))}
         </div>
