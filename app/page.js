@@ -4,19 +4,18 @@ import { supabase } from '@/lib/supabase'
 
 export default function HomePrincipal() {
   const [mesasOcupadas, setMesasOcupadas] = useState([])
+  const [zonaFiltro, setZonaFiltro] = useState('Todas')
   const [mesaSeleccionada, setMesaSeleccionada] = useState(null)
   const [pedidoActual, setPedidoActual] = useState(null)
   const [lineasTicket, setLineasTicket] = useState([])
   const [cargando, setCargando] = useState(false)
   const [procesandoCobro, setProcesandoCobro] = useState(false)
 
-  // Cargar mesas ocupadas al iniciar la app
   useEffect(() => {
     cargarMesasOcupadas()
 
-    // Suscripción en tiempo real para enterarse de comandas nuevas
     const channel = supabase
-      .channel('cambios-mesas-caja')
+      .channel('cambios-caja-principal')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mesas' }, () => {
         cargarMesasOcupadas()
       })
@@ -27,7 +26,6 @@ export default function HomePrincipal() {
     }
   }, [])
 
-  // Obtener lista de mesas con estado 'ocupada'
   const cargarMesasOcupadas = async () => {
     const { data, error } = await supabase
       .from('mesas')
@@ -36,13 +34,12 @@ export default function HomePrincipal() {
       .order('numero', { ascending: true })
 
     if (error) {
-      console.error('Error al cargar mesas:', error)
+      console.error('Error al obtener mesas:', error)
       return
     }
     setMesasOcupadas(data || [])
   }
 
-  // Cargar el pedido abierto de la mesa seleccionada
   const verDetalleMesa = async (mesa) => {
     setMesaSeleccionada(mesa)
     setCargando(true)
@@ -63,7 +60,7 @@ export default function HomePrincipal() {
       .maybeSingle()
 
     if (error) {
-      console.error('Error al obtener el detalle del pedido:', error)
+      console.error('Error al cargar pedido:', error)
       setCargando(false)
       return
     }
@@ -79,7 +76,6 @@ export default function HomePrincipal() {
     setCargando(false)
   }
 
-  // Calcular importe total sumando precio * cantidad
   const calcularTotal = () => {
     return lineasTicket.reduce((total, item) => {
       const cantidad = item.cantidad || 1
@@ -87,17 +83,14 @@ export default function HomePrincipal() {
     }, 0)
   }
 
-  // Imprimir ticket, cerrar el pedido y liberar la mesa
   const cobrarEImprimir = async () => {
     if (!mesaSeleccionada || !pedidoActual) return
 
     try {
       setProcesandoCobro(true)
 
-      // 1. Abrir diálogo de impresión
       window.print()
 
-      // 2. Marcar pedido como 'cobrado'
       const { error: errorPedido } = await supabase
         .from('pedidos')
         .update({ estado: 'cobrado' })
@@ -105,7 +98,6 @@ export default function HomePrincipal() {
 
       if (errorPedido) throw errorPedido
 
-      // 3. Liberar la mesa
       const { error: errorMesa } = await supabase
         .from('mesas')
         .update({ estado: 'libre' })
@@ -113,22 +105,25 @@ export default function HomePrincipal() {
 
       if (errorMesa) throw errorMesa
 
-      // Limpiar estados y refrescar lista de mesas
       setMesaSeleccionada(null)
       setPedidoActual(null)
       setLineasTicket([])
       await cargarMesasOcupadas()
     } catch (err) {
-      console.error('Error durante el proceso de cobro:', err)
-      alert('Ocurrió un error al procesar el cobro. Por favor reintenta.')
+      console.error('Error procesando el cobro:', err)
+      alert('Hubo un error al procesar el cobro. Reinténtalo.')
     } finally {
       setProcesandoCobro(false)
     }
   }
 
+  // Filtrar mesas ocupadas según la pestaña activa
+  const mesasFiltradas = zonaFiltro === 'Todas' 
+    ? mesasOcupadas 
+    : mesasOcupadas.filter((m) => m.zona === zonaFiltro)
+
   return (
     <>
-      {/* Estilos para formatear la impresión en impresoras térmicas de 80mm */}
       <style jsx global>{`
         @media print {
           body * {
@@ -147,44 +142,63 @@ export default function HomePrincipal() {
             padding: 10px;
             font-family: monospace;
           }
-          .ocultar-en-impresion {
+          .no-imprimir {
             display: none !important;
           }
         }
       `}</style>
 
       <div className="min-h-screen bg-slate-900 text-white p-6 flex flex-col md:flex-row gap-6">
-        {/* Panel Izquierdo: Selección de Mesas Ocupadas */}
-        <div className="w-full md:w-1/2 ocultar-en-impresion">
-          <h2 className="text-2xl font-bold mb-4 text-amber-500">
-            Mesas con Cuenta Pendiente
-          </h2>
+        {/* PANEL IZQUIERDO: Mesas Ocupadas (Filtrables por Zona) */}
+        <div className="w-full md:w-1/2 no-imprimir">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-2xl font-bold text-amber-500">
+              Cuentas Pendientes ({mesasOcupadas.length})
+            </h2>
+          </div>
 
-          {mesasOcupadas.length === 0 ? (
-            <div className="p-8 bg-slate-800/50 border border-slate-700 rounded-2xl text-slate-400 text-center font-semibold">
-              No hay mesas ocupadas actualmente.
+          {/* Filtros por Zona */}
+          <div className="flex gap-2 mb-4">
+            {['Todas', 'Terraza', 'Salón', 'Barra'].map((z) => (
+              <button
+                key={z}
+                onClick={() => setZonaFiltro(z)}
+                className={`px-4 py-2 text-xs font-bold rounded-xl transition ${
+                  zonaFiltro === z
+                    ? 'bg-amber-500 text-slate-950 font-black'
+                    : 'bg-slate-800 text-slate-400 border border-slate-700 hover:bg-slate-700'
+                }`}
+              >
+                {z}
+              </button>
+            ))}
+          </div>
+
+          {mesasFiltradas.length === 0 ? (
+            <div className="p-8 bg-slate-800/40 border border-slate-700/60 rounded-2xl text-slate-400 text-center font-medium">
+              No hay mesas ocupadas en {zonaFiltro === 'Todas' ? 'ninguna zona' : `la zona ${zonaFiltro}`}.
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-4">
-              {mesasOcupadas.map((m) => {
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 max-h-[75vh] overflow-y-auto pr-1">
+              {mesasFiltradas.map((m) => {
                 const esActiva = mesaSeleccionada?.id === m.id
                 return (
                   <button
                     key={m.id}
                     onClick={() => verDetalleMesa(m)}
-                    className={`p-6 border rounded-2xl text-left font-extrabold text-xl transition ${
+                    className={`p-4 border rounded-2xl text-left transition ${
                       esActiva
                         ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-lg scale-[1.02]'
-                        : 'bg-red-950/40 border-red-500 hover:bg-red-900/40 text-white'
+                        : 'bg-red-950/40 border-red-500/80 hover:bg-red-900/40 text-white'
                     }`}
                   >
-                    Mesa {m.numero}
+                    <span className="font-black text-lg block">Mesa {m.numero}</span>
                     <span
-                      className={`text-xs uppercase block mt-1 ${
+                      className={`text-[10px] uppercase font-bold block mt-1 ${
                         esActiva ? 'text-slate-900' : 'text-slate-400'
                       }`}
                     >
-                      {m.zona || 'General'}
+                      {m.zona}
                     </span>
                   </button>
                 )
@@ -193,25 +207,25 @@ export default function HomePrincipal() {
           )}
         </div>
 
-        {/* Panel Derecho: Previsualización e Impresión del Ticket */}
-        <div className="w-full md:w-1/2 bg-slate-800 p-6 rounded-2xl flex flex-col justify-between border border-slate-700">
+        {/* PANEL DERECHO: Visor de Ticket */}
+        <div className="w-full md:w-1/2 bg-slate-800 p-6 rounded-2xl flex flex-col justify-between border border-slate-700/80 shadow-2xl">
           <div id="ticket-impresion">
-            <h3 className="text-xl font-bold border-b border-slate-700 pb-2 text-center md:text-left">
+            <h3 className="text-xl font-bold border-b border-slate-700 pb-3 text-center md:text-left">
               {mesaSeleccionada
-                ? `Ticket Mesa ${mesaSeleccionada.numero}`
+                ? `Ticket Mesa ${mesaSeleccionada.numero} (${mesaSeleccionada.zona})`
                 : 'Selecciona una mesa'}
             </h3>
 
             <div className="my-4 space-y-2">
               {cargando ? (
-                <p className="text-slate-400 text-sm animate-pulse">
-                  Cargando consumiciones...
+                <p className="text-slate-400 text-sm animate-pulse py-2">
+                  Cargando comandas...
                 </p>
               ) : lineasTicket.length === 0 ? (
-                <p className="text-slate-500 text-sm italic">
+                <p className="text-slate-500 text-sm italic py-2">
                   {mesaSeleccionada
-                    ? 'No hay productos en esta cuenta.'
-                    : 'Selecciona una mesa para cobrar o emitir el ticket.'}
+                    ? 'No hay consumiciones en este pedido.'
+                    : 'Haz clic en una mesa para cargar la cuenta.'}
                 </p>
               ) : (
                 lineasTicket.map((item, idx) => {
@@ -243,8 +257,7 @@ export default function HomePrincipal() {
             </div>
           </div>
 
-          {/* Botón de cobro e impresión */}
-          <div className="ocultar-en-impresion">
+          <div className="no-imprimir">
             <button
               onClick={cobrarEImprimir}
               disabled={
