@@ -9,6 +9,7 @@ export default function BarraPage() {
 
   const fetchComandasBarra = async () => {
     try {
+      // 1. Obtener las líneas pendientes para barra
       const { data: lineas, error: errLineas } = await supabase
         .from('lineas_pedido')
         .select('*')
@@ -26,24 +27,40 @@ export default function BarraPage() {
         return;
       }
 
+      // 2. Extraer los IDs únicos de pedidos
       const pedidoIds = [...new Set(lineas.map((l) => l.pedido_id))];
+
+      // 3. Consultar pedidos trayendo la información de la tabla relacional 'mesas'
       const { data: pedidos } = await supabase
         .from('pedidos')
-        .select('id, mesa_id')
+        .select(`
+          id,
+          mesas (
+            numero,
+            zona
+          )
+        `)
         .in('id', pedidoIds);
 
+      // 4. Mapear pedidos a su nombre legible (Ej: "Terraza - Mesa 5")
       const mapaMesas = {};
       pedidos?.forEach((p) => {
-        mapaMesas[p.id] = p.mesa_id;
+        if (p.mesas) {
+          const zona = p.mesas.zona ? p.mesas.zona.toUpperCase() : 'MESA';
+          mapaMesas[p.id] = `${zona} - Mesa ${p.mesas.numero}`;
+        } else {
+          mapaMesas[p.id] = `Pedido #${p.id}`;
+        }
       });
 
+      // 5. Agrupar las líneas por comanda
       const grupos = {};
       lineas.forEach((linea) => {
         const pId = linea.pedido_id;
         if (!grupos[pId]) {
           grupos[pId] = {
             pedido_id: pId,
-            mesa: mapaMesas[pId] ? `Mesa ${mapaMesas[pId]}` : `Pedido #${pId}`,
+            mesa: mapaMesas[pId] || `Pedido #${pId}`,
             hora: linea.created_at,
             items: []
           };
@@ -78,9 +95,8 @@ export default function BarraPage() {
     };
   }, []);
 
-  // 1. MARCAR COMO SERVIDO
+  // 1. MARCAR COMANDA COMPLETA COMO SERVIDA
   const marcarComandaCompleta = async (pedidoId) => {
-    // Quitamos la comanda localmente de inmediato para que la pantalla responda al instante
     setComandasAgrupadas((prev) => prev.filter((g) => g.pedido_id !== pedidoId));
 
     const { error } = await supabase
@@ -90,19 +106,17 @@ export default function BarraPage() {
       .eq('destino', 'barra');
 
     if (error) {
-      console.error('Error en Supabase (revisa políticas RLS):', error.message);
-      // Si falla en BD, recargamos para no descuadrar
+      console.error('Error en Supabase (revisa RLS):', error.message);
       fetchComandasBarra();
     }
   };
 
-  // 2. BORRAR/CANCELAR COMANDA DE LA BASE DE DATOS
+  // 2. BORRAR/CANCELAR COMANDA EN LA BASE DE DATOS
   const borrarComanda = async (pedidoId) => {
     if (!confirm('¿Seguro que quieres BORRAR esta comanda?')) return;
 
     setComandasAgrupadas((prev) => prev.filter((g) => g.pedido_id !== pedidoId));
 
-    // Eliminar las líneas de pedido
     const { error } = await supabase
       .from('lineas_pedido')
       .delete()
@@ -115,6 +129,7 @@ export default function BarraPage() {
     }
   };
 
+  // 3. MARCAR UN SOLO ÍTEM COMO SERVIDO
   const marcarItemListo = async (id, pedidoId) => {
     const { error } = await supabase
       .from('lineas_pedido')
@@ -167,10 +182,10 @@ export default function BarraPage() {
             >
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #333', paddingBottom: '10px', marginBottom: '12px' }}>
-                  <span style={{ fontSize: '1.4rem', fontWeight: 'bold', color: '#3498db' }}>
+                  <span style={{ fontSize: '1.3rem', fontWeight: 'bold', color: '#3498db' }}>
                     {grupo.mesa}
                   </span>
-                  <span style={{ fontSize: '1rem', color: '#3498db', fontWeight: 'bold', background: '#2c2c2c', padding: '4px 8px', borderRadius: '4px' }}>
+                  <span style={{ fontSize: '0.9rem', color: '#3498db', fontWeight: 'bold', background: '#2c2c2c', padding: '4px 8px', borderRadius: '4px' }}>
                     🕒 {obtenerHora(grupo.hora)}
                   </span>
                 </div>
@@ -185,7 +200,7 @@ export default function BarraPage() {
                         alignItems: 'center', 
                         padding: '8px 0', 
                         borderBottom: '1px dashed #333',
-                        fontSize: '1.2rem',
+                        fontSize: '1.1rem',
                         fontWeight: 'bold'
                       }}
                     >
@@ -212,7 +227,6 @@ export default function BarraPage() {
                 </ul>
               </div>
 
-              {/* BARRA DE ACCIONES CON BOTÓN DE SERVIR Y BOTÓN DE BORRAR */}
               <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
                 <button
                   onClick={() => marcarComandaCompleta(grupo.pedido_id)}
