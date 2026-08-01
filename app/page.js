@@ -42,14 +42,16 @@ export default function HomePrincipal() {
   const [zonaActiva, setZonaActiva] = useState('Terraza')
   const [mesaNum, setMesaNum] = useState(1)
 
-  // ESTADO DE TICKETS PERSISTENTES POR MESA
+  // ESTADO DE TICKETS Y NOTAS PERSISTENTES POR MESA
   const [ticketsPorMesa, setTicketsPorMesa] = useState({})
+  const [notasPorMesa, setNotasPorMesa] = useState({}) // <-- NUEVO: Guardar notas por mesa
 
   // Multiplicador / Unidades
   const [multiplicador, setMultiplicador] = useState(1)
 
   const claveMesaActual = `${zonaActiva}-${mesaNum}`
   const ticketActual = ticketsPorMesa[claveMesaActual] || []
+  const notaActual = notasPorMesa[claveMesaActual] || '' // <-- NUEVO: Nota o alias de la mesa actual
 
   useEffect(() => {
     cargarProductos()
@@ -80,6 +82,11 @@ export default function HomePrincipal() {
     const fams = [...new Set(PRODUCTOS_EJEMPLO.map((p) => p.familia))]
     setFamilias(fams)
     setFamiliaActiva(fams[0])
+  }
+
+  // Función para cambiar la nota/alias de la mesa actual
+  const handleNotaChange = (nuevaNota) => {
+    setNotasPorMesa({ ...notasPorMesa, [claveMesaActual]: nuevaNota })
   }
 
   const agregarAlTicket = (prod) => {
@@ -152,7 +159,7 @@ export default function HomePrincipal() {
       const mesaId = await obtenerOCrearMesa()
       const { data: pedido } = await supabase
         .from('pedidos')
-        .insert([{ mesa_id: mesaId, estado: 'abierto' }])
+        .insert([{ mesa_id: mesaId, estado: 'abierto', nota: notaActual }])
         .select()
         .single()
 
@@ -170,7 +177,7 @@ export default function HomePrincipal() {
       }
 
       setMultiplicador(1)
-      alert(`📝 Comanda enviada: ${zonaActiva} - Mesa ${mesaNum}`)
+      alert(`📝 Comanda enviada: ${zonaActiva} - Mesa ${mesaNum} ${notaActual ? `(${notaActual})` : ''}`)
     } catch (err) {
       alert(`❌ Error al enviar comanda: ${err.message || 'Error de conexión'}`)
     }
@@ -184,7 +191,7 @@ export default function HomePrincipal() {
       const mesaId = await obtenerOCrearMesa()
       const { data: pedido } = await supabase
         .from('pedidos')
-        .insert([{ mesa_id: mesaId, estado: 'cobrado' }])
+        .insert([{ mesa_id: mesaId, estado: 'cobrado', nota: notaActual }])
         .select()
         .single()
 
@@ -201,24 +208,38 @@ export default function HomePrincipal() {
         await supabase.from('lineas_pedido').insert(lineas)
       }
 
-      const copia = { ...ticketsPorMesa }
-      delete copia[claveMesaActual]
-      setTicketsPorMesa(copia)
+      const copiaTickets = { ...ticketsPorMesa }
+      delete copiaTickets[claveMesaActual]
+      setTicketsPorMesa(copiaTickets)
+
+      const copiaNotas = { ...notasPorMesa }
+      delete copiaNotas[claveMesaActual]
+      setNotasPorMesa(copiaNotas)
+
       setMultiplicador(1)
       alert('💳 Cobro registrado y ticket emitido')
     } catch {
-      const copia = { ...ticketsPorMesa }
-      delete copia[claveMesaActual]
-      setTicketsPorMesa(copia)
+      const copiaTickets = { ...ticketsPorMesa }
+      delete copiaTickets[claveMesaActual]
+      setTicketsPorMesa(copiaTickets)
+
+      const copiaNotas = { ...notasPorMesa }
+      delete copiaNotas[claveMesaActual]
+      setNotasPorMesa(copiaNotas)
+
       setMultiplicador(1)
     }
   }
 
   const borrarTicketMesa = () => {
-    if (confirm(`¿Limpiar ticket de ${zonaActiva} - Mesa ${mesaNum}?`)) {
-      const copia = { ...ticketsPorMesa }
-      delete copia[claveMesaActual]
-      setTicketsPorMesa(copia)
+    if (confirm(`¿Limpiar ticket y descripción de ${zonaActiva} - Mesa ${mesaNum}?`)) {
+      const copiaTickets = { ...ticketsPorMesa }
+      delete copiaTickets[claveMesaActual]
+      setTicketsPorMesa(copiaTickets)
+
+      const copiaNotas = { ...notasPorMesa }
+      delete copiaNotas[claveMesaActual]
+      setNotasPorMesa(copiaNotas)
     }
   }
 
@@ -270,7 +291,7 @@ export default function HomePrincipal() {
             </div>
           </div>
 
-          {/* SELECTOR DE MESA (1 A 20) */}
+          {/* SELECTOR DE MESA + ALIAS / CLIENTE */}
           <div className="flex items-center gap-2">
             <span className="font-black text-xs uppercase">SELECCIONAR MESA:</span>
             <select
@@ -288,6 +309,15 @@ export default function HomePrincipal() {
                 )
               })}
             </select>
+
+            {/* NUEVO: INPUT PARA EL ALIAS O DESCRIPCIÓN DEL CLIENTE */}
+            <input
+              type="text"
+              placeholder="Ej: Camiseta blanca / Gorra"
+              value={notaActual}
+              onChange={(e) => handleNotaChange(e.target.value)}
+              className="bg-white text-slate-900 font-bold px-3 py-1 rounded border-2 border-slate-900 text-sm shadow placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900 w-56"
+            />
           </div>
         </header>
 
@@ -305,23 +335,30 @@ export default function HomePrincipal() {
                 </div>
                 {ticketActual.length === 0 ? (
                   <div className="text-center text-slate-400 text-xs mt-10 italic">
-                    {zonaActiva} - Mesa {mesaNum} sin productos
+                    {zonaActiva} - Mesa {mesaNum} {notaActual ? `("${notaActual}")` : ''} sin productos
                   </div>
                 ) : (
-                  ticketActual.map((item) => (
-                    <div key={item.id} className="flex justify-between items-center text-sm border-b border-slate-100 py-1.5">
-                      <div className="flex items-center gap-1.5">
-                        <button onClick={() => cambiarCantidadItem(item.id, -1)} className="w-5 h-5 bg-red-600 text-white font-black rounded text-xs">
-                          -
-                        </button>
-                        <button onClick={() => cambiarCantidadItem(item.id, 1)} className="w-5 h-5 bg-emerald-600 text-white font-black rounded text-xs">
-                          +
-                        </button>
-                        <span className="font-bold text-slate-800">{item.cantidad}x {item.nombre}</span>
+                  <>
+                    {notaActual && (
+                      <div className="bg-amber-100 border border-amber-300 text-amber-900 text-xs font-bold px-2 py-1 rounded mb-2">
+                        👤 Cliente: {notaActual}
                       </div>
-                      <span className="font-black text-slate-900">{(Number(item.precio) * item.cantidad).toFixed(2)}€</span>
-                    </div>
-                  ))
+                    )}
+                    {ticketActual.map((item) => (
+                      <div key={item.id} className="flex justify-between items-center text-sm border-b border-slate-100 py-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <button onClick={() => cambiarCantidadItem(item.id, -1)} className="w-5 h-5 bg-red-600 text-white font-black rounded text-xs">
+                            -
+                          </button>
+                          <button onClick={() => cambiarCantidadItem(item.id, 1)} className="w-5 h-5 bg-emerald-600 text-white font-black rounded text-xs">
+                            +
+                          </button>
+                          <span className="font-bold text-slate-800">{item.cantidad}x {item.nombre}</span>
+                        </div>
+                        <span className="font-black text-slate-900">{(Number(item.precio) * item.cantidad).toFixed(2)}€</span>
+                      </div>
+                    ))}
+                  </>
                 )}
               </div>
 
@@ -394,7 +431,7 @@ export default function HomePrincipal() {
               ))}
             </div>
 
-            {/* BARRA INFERIOR DE ACCIONES RÁPIDAS (Estilo TPV Imagen) */}
+            {/* BARRA INFERIOR DE ACCIONES RÁPIDAS */}
             <div className="grid grid-cols-4 gap-2">
               <button
                 onClick={enviarComanda}
@@ -439,6 +476,7 @@ export default function HomePrincipal() {
         <h2 style={{ textAlign: 'center', margin: '0 0 5px 0' }}>JORCO FUSIÓN</h2>
         <h3 style={{ textAlign: 'center', margin: '0 0 10px 0' }}>TICKET DE COMPRA</h3>
         <p><strong>Zona:</strong> {zonaActiva} | <strong>Mesa:</strong> {mesaNum}</p>
+        {notaActual && <p><strong>Cliente:</strong> {notaActual}</p>}
         <hr />
         {ticketActual.map((item) => (
           <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', margin: '4px 0' }}>
