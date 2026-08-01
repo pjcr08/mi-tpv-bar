@@ -26,9 +26,9 @@ export default function CocinaView() {
     }
   }, [])
 
-  const cargarPedidosCocina = async () => {
+ const cargarPedidosCocina = async () => {
     try {
-      // 1. Obtener pedidos abiertos
+      // 1. Obtener pedidos abiertos (Quitamos el .order temporalmente)
       const { data: pedidosData, error: pedidosErr } = await supabase
         .from('pedidos')
         .select(`
@@ -42,7 +42,6 @@ export default function CocinaView() {
           )
         `)
         .eq('estado', 'abierto')
-        .order('created_at', { ascending: true })
 
       if (pedidosErr) throw pedidosErr
 
@@ -51,6 +50,36 @@ export default function CocinaView() {
         setCargando(false)
         return
       }
+
+      // 2. Obtener las líneas de pedido
+      const pedidoIds = pedidosData.map((p) => p.id)
+      const { data: lineasData, error: lineasErr } = await supabase
+        .from('lineas_pedido')
+        .select('*')
+        .in('pedido_id', pedidoIds)
+
+      if (lineasErr) throw lineasErr
+
+      // 3. Filtrar líneas para cocina (si no tienen destino definido, también las muestra)
+      const lineasCocina = (lineasData || []).filter(
+        (l) => !l.destino || l.destino.toLowerCase() === 'cocina'
+      )
+
+      // 4. Agrupar
+      const pedidosConLineas = pedidosData
+        .map((ped) => {
+          const lineas = lineasCocina.filter((l) => l.pedido_id === ped.id)
+          return { ...ped, lineas }
+        })
+        .filter((ped) => ped.lineas.length > 0)
+
+      setPedidos(pedidosConLineas)
+    } catch (err) {
+      console.error('Error cargando cocina:', err)
+    } finally {
+      setCargando(false)
+    }
+  }
 
       // 2. Obtener las líneas de pedido destinadas a cocina
       const pedidoIds = pedidosData.map((p) => p.id)
