@@ -52,28 +52,33 @@ export default function CocinaView() {
         return
       }
 
-      // 2. Obtener las líneas de pedido destinadas a cocina o pendients
+      // 2. Obtener las líneas de pedido destinadas a cocina (hacemos el filtro flexible)
       const pedidoIds = pedidosData.map((p) => p.id)
       const { data: lineasData, error: lineasErr } = await supabase
         .from('lineas_pedido')
         .select('*')
         .in('pedido_id', pedidoIds)
-        .eq('destino', 'cocina')
 
       if (lineasErr) throw lineasErr
 
-      // 3. Agrupar líneas con sus respectivos pedidos
+      // 3. Filtrar líneas que vayan a cocina (tolerante a mayúsculas/minúsculas)
+      //    Si quieres que cocina VEA TODO sin filtrar por destino, quita el .filter() de 'destino'
+      const lineasCocina = (lineasData || []).filter(
+        (l) => !l.destino || l.destino.toLowerCase() === 'cocina'
+      )
+
+      // 4. Agrupar líneas con sus respectivos pedidos
       const pedidosConLineas = pedidosData
         .map((ped) => {
-          const lineas = (lineasData || []).filter((l) => l.pedido_id === ped.id)
+          const lineas = lineasCocina.filter((l) => l.pedido_id === ped.id)
           return { ...ped, lineas }
         })
-        .filter((ped) => ped.lineas.length > 0) // Mostrar solo los que tengan productos de cocina
+        .filter((ped) => ped.lineas.length > 0) // Solo mostrar si tienen platos para cocina
 
       setPedidos(pedidosConLineas)
     } catch (err) {
       console.error('Error cargando cocina:', err)
-    } finally {
+    } font-sans finally {
       setCargando(false)
     }
   }
@@ -94,7 +99,10 @@ export default function CocinaView() {
   // Marcar toda la comanda como lista
   const completarPedido = async (pedidoId) => {
     setPedidos((prev) => prev.filter((p) => p.id !== pedidoId))
-    await supabase.from('lineas_pedido').update({ estado: 'listo' }).eq('pedido_id', pedidoId).eq('destino', 'cocina')
+    await supabase
+      .from('lineas_pedido')
+      .update({ estado: 'listo' })
+      .eq('pedido_id', pedidoId)
   }
 
   return (
@@ -143,7 +151,6 @@ export default function CocinaView() {
                       <span className="font-black text-amber-500 text-base uppercase block tracking-wide">
                         {zona.toUpperCase()} - {nombreMesa}
                       </span>
-                      {/* 🔴 ALIAS DEL CLIENTE (PEPITO, GORRA ROJA, ETC) */}
                       {ped.nota && (
                         <span className="inline-block mt-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-md text-xs font-black">
                           👤 {ped.nota}
