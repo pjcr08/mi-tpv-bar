@@ -26,9 +26,9 @@ export default function CocinaView() {
     }
   }, [])
 
- const cargarPedidosCocina = async () => {
+  const cargarPedidosCocina = async () => {
     try {
-      // 1. Obtener pedidos abiertos (Quitamos el .order temporalmente)
+      // 1. Obtener pedidos abiertos (consultando columnas existentes en mesas)
       const { data: pedidosData, error: pedidosErr } = await supabase
         .from('pedidos')
         .select(`
@@ -37,8 +37,7 @@ export default function CocinaView() {
           created_at,
           mesas (
             zona,
-            numero,
-            nombre_custom
+            numero
           )
         `)
         .eq('estado', 'abierto')
@@ -60,42 +59,12 @@ export default function CocinaView() {
 
       if (lineasErr) throw lineasErr
 
-      // 3. Filtrar líneas para cocina (si no tienen destino definido, también las muestra)
+      // 3. Filtrar líneas que vayan a cocina
       const lineasCocina = (lineasData || []).filter(
         (l) => !l.destino || l.destino.toLowerCase() === 'cocina'
       )
 
-      // 4. Agrupar
-      const pedidosConLineas = pedidosData
-        .map((ped) => {
-          const lineas = lineasCocina.filter((l) => l.pedido_id === ped.id)
-          return { ...ped, lineas }
-        })
-        .filter((ped) => ped.lineas.length > 0)
-
-      setPedidos(pedidosConLineas)
-    } catch (err) {
-      console.error('Error cargando cocina:', err)
-    } finally {
-      setCargando(false)
-    }
-  }
-
-      // 2. Obtener las líneas de pedido destinadas a cocina
-      const pedidoIds = pedidosData.map((p) => p.id)
-      const { data: lineasData, error: lineasErr } = await supabase
-        .from('lineas_pedido')
-        .select('*')
-        .in('pedido_id', pedidoIds)
-
-      if (lineasErr) throw lineasErr
-
-      // 3. Filtrar líneas que vayan a cocina (tolerante a mayúsculas/minúsculas o nulos)
-      const lineasCocina = (lineasData || []).filter(
-        (l) => !l.destino || l.destino.toLowerCase() === 'cocina'
-      )
-
-      // 4. Agrupar líneas con sus respectivos pedidos
+      // 4. Agrupar líneas con sus pedidos
       const pedidosConLineas = pedidosData
         .map((ped) => {
           const lineas = lineasCocina.filter((l) => l.pedido_id === ped.id)
@@ -158,8 +127,8 @@ export default function CocinaView() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {pedidos.map((ped) => {
-            const nombreMesa = ped.mesas?.nombre_custom || `Mesa ${ped.mesas?.numero || ''}`
-            const zona = ped.mesas?.zona || 'Terraza'
+            const nombreMesa = `Mesa ${ped.mesas?.numero || ''}`
+            const zona = ped.mesas?.zona || 'Sala'
             const hora = ped.created_at
               ? new Date(ped.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
               : '--:--'
@@ -173,7 +142,7 @@ export default function CocinaView() {
                 }`}
               >
                 <div>
-                  {/* CABECERA CON ZONA, MESA Y ALIAS DEL CLIENTE */}
+                  {/* CABECERA CON ZONA Y MESA */}
                   <div className="flex justify-between items-start mb-3 pb-2 border-b border-slate-800">
                     <div>
                       <span className="font-black text-amber-500 text-base uppercase block tracking-wide">
