@@ -3,46 +3,16 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 
-// Productos de prueba con imágenes e iconos táctiles al estilo del nuevo TPV
-const PRODUCTOS_EJEMPLO = [
-  // CAFÉS
-  { id: 101, nombre: 'Café Solo', precio: 1.20, familia: 'Cafés', destino: 'barra', img: '☕' },
-  { id: 102, nombre: 'Café con Leche', precio: 1.40, familia: 'Cafés', destino: 'barra', img: '🥛' },
-  { id: 103, nombre: 'Jorco Especial', precio: 2.20, familia: 'Cafés', destino: 'barra', img: '⭐' },
-  { id: 104, nombre: 'Cortado', precio: 1.30, familia: 'Cafés', destino: 'barra', img: '☕' },
-  { id: 105, nombre: 'Carajillo', precio: 2.00, familia: 'Cafés', destino: 'barra', img: '🥃' },
-
-  // BEBIDAS
-  { id: 106, nombre: 'Caña Doble', precio: 2.50, familia: 'Bebidas', destino: 'barra', img: '🍺' },
-  { id: 107, nombre: 'Refresco Cola', precio: 2.20, familia: 'Bebidas', destino: 'barra', img: '🥤' },
-  { id: 108, nombre: 'Agua 50cl', precio: 1.50, familia: 'Bebidas', destino: 'barra', img: '💧' },
-  { id: 109, nombre: 'Tercio 1/3', precio: 2.80, familia: 'Bebidas', destino: 'barra', img: '🍾' },
-  { id: 110, nombre: 'Copa Vino', precio: 3.00, familia: 'Bebidas', destino: 'barra', img: '🍷' },
-
-  // COMIDA
-  { id: 111, nombre: 'Bocad. Jamón', precio: 4.50, familia: 'Comida', destino: 'cocina', img: '🥖' },
-  { id: 112, nombre: 'Ración Bravas', precio: 6.00, familia: 'Comida', destino: 'cocina', img: '🍟' },
-  { id: 113, nombre: 'Pincho Tortilla', precio: 3.50, familia: 'Comida', destino: 'cocina', img: '🍳' },
-  { id: 114, nombre: 'Burger Jorco', precio: 8.50, familia: 'Comida', destino: 'cocina', img: '🍔' },
-  { id: 115, nombre: 'Pizza Jamón', precio: 9.00, familia: 'Comida', destino: 'cocina', img: '🍕' },
-  { id: 116, nombre: 'Ensalada', precio: 5.50, familia: 'Comida', destino: 'cocina', img: '🥗' },
-
-  // POSTRES
-  { id: 117, nombre: 'Tarta Queso', precio: 4.00, familia: 'Postres', destino: 'cocina', img: '🍰' },
-  { id: 118, nombre: 'Flan Casero', precio: 3.50, familia: 'Postres', destino: 'cocina', img: '🍮' },
-  { id: 119, nombre: 'Helado 2 Bolas', precio: 3.00, familia: 'Postres', destino: 'cocina', img: '🍨' },
-]
-
 export default function HomePrincipal() {
   const [familias, setFamilias] = useState([])
   const [familiaActiva, setFamiliaActiva] = useState('')
   const [productos, setProductos] = useState([])
 
-  // ZONA Y MESAS (Ahora 1 a 20 para todas las zonas)
+  // ZONA Y MESAS
   const [zonaActiva, setZonaActiva] = useState('Terraza')
   const [mesaNum, setMesaNum] = useState(1)
 
-  // NOMBRES PERSONALIZADOS PARA MESAS (ej: 'Terraza-1': 'Mesa VIP')
+  // NOMBRES PERSONALIZADOS PARA MESAS
   const [nombresMesas, setNombresMesas] = useState({})
 
   // ESTADO DE TICKETS Y NOTAS PERSISTENTES POR MESA
@@ -56,7 +26,6 @@ export default function HomePrincipal() {
   const ticketActual = ticketsPorMesa[claveMesaActual] || []
   const notaActual = notasPorMesa[claveMesaActual] || ''
 
-  // Obtener el nombre visual de la mesa (personalizado o predeterminado)
   const obtenerNombreMesa = (num) => {
     const clave = `${zonaActiva}-${num}`
     return nombresMesas[clave] || `Mesa ${num}`
@@ -66,65 +35,140 @@ export default function HomePrincipal() {
 
   useEffect(() => {
     cargarProductos()
-  }, [])
+    cargarNombresMesas()
+    cargarComandasServidor()
+
+    // ESCUCHA EN TIEMPO REAL (REALTIME DE SUPABASE)
+    const channel = supabase
+      .channel('tpv-realtime-home')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, () => {
+        cargarComandasServidor()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'lineas_pedido' }, () => {
+        cargarComandasServidor()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mesas' }, () => {
+        cargarNombresMesas()
+      })
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [zonaActiva, mesaNum])
 
   const cargarProductos = async () => {
     try {
       const { data, error } = await supabase.from('productos').select('*')
-      if (error || !data || data.length === 0) {
-        usarProductosEjemplo()
-        return
-      }
+      if (error || !data) return
       setProductos(data)
       const fams = [...new Set(data.map((p) => p.familia))].filter(Boolean)
       if (fams.length > 0) {
         setFamilias(fams)
         setFamiliaActiva(fams[0])
-      } else {
-        usarProductosEjemplo()
       }
-    } catch {
-      usarProductosEjemplo()
+    } catch (err) {
+      console.error('Error al cargar productos:', err)
     }
   }
 
-  const usarProductosEjemplo = () => {
-    setProductos(PRODUCTOS_EJEMPLO)
-    const fams = [...new Set(PRODUCTOS_EJEMPLO.map((p) => p.familia))]
-    setFamilias(fams)
-    setFamiliaActiva(fams[0])
+  const cargarNombresMesas = async () => {
+    try {
+      const { data } = await supabase.from('mesas').select('zona, numero, nombre_custom')
+      if (data) {
+        const mapa = {}
+        data.forEach((m) => {
+          if (m.nombre_custom) mapa[`${m.zona}-${m.numero}`] = m.nombre_custom
+        })
+        setNombresMesas(mapa)
+      }
+    } catch (e) {
+      console.error(e)
+    }
   }
 
-  // Cambiar la nota/alias de la mesa actual
+  // Carga todas las comandas en estado "abierto" de la BD
+  const cargarComandasServidor = async () => {
+    try {
+      const { data: pedidosBD } = await supabase
+        .from('pedidos')
+        .select(`
+          id,
+          nota,
+          mesa_id,
+          mesas ( zona, numero ),
+          lineas_pedido ( id, producto_nombre, precio, cantidad, destino )
+        `)
+        .eq('estado', 'abierto')
+
+      if (!pedidosBD) return
+
+      const nuevosTickets = {}
+      const nuevasNotas = {}
+
+      pedidosBD.forEach((ped) => {
+        if (ped.mesas) {
+          const clave = `${ped.mesas.zona}-${ped.mesas.numero}`
+          nuevasNotas[clave] = ped.nota || ''
+          nuevosTickets[clave] = (ped.lineas_pedido || []).map((l) => ({
+            id: l.id,
+            nombre: l.producto_nombre,
+            precio: Number(l.precio),
+            cantidad: l.cantidad,
+            destino: l.destino,
+          }))
+        }
+      })
+
+      setTicketsPorMesa(nuevosTickets)
+      setNotasPorMesa(nuevasNotas)
+    } catch (err) {
+      console.error('Error cargando comandas activas:', err)
+    }
+  }
+
   const handleNotaChange = (nuevaNota) => {
     setNotasPorMesa({ ...notasPorMesa, [claveMesaActual]: nuevaNota })
   }
 
-  // Renombrar la mesa actual
-  const renombrarMesa = () => {
+  const renombrarMesa = async () => {
     const nombreActual = obtenerNombreMesa(mesaNum)
     const nuevoNombre = prompt(`Introduce un nuevo nombre para ${zonaActiva} - ${nombreActual}:`, nombreActual)
 
     if (nuevoNombre !== null && nuevoNombre.trim() !== '') {
+      const nombreLimpio = nuevoNombre.trim()
       setNombresMesas({
         ...nombresMesas,
-        [claveMesaActual]: nuevoNombre.trim(),
+        [claveMesaActual]: nombreLimpio,
       })
+
+      const { data: mesaBD } = await supabase
+        .from('mesas')
+        .select('id')
+        .eq('zona', zonaActiva)
+        .eq('numero', mesaNum)
+        .maybeSingle()
+
+      if (mesaBD) {
+        await supabase.from('mesas').update({ nombre_custom: nombreLimpio }).eq('id', mesaBD.id)
+      } else {
+        await supabase.from('mesas').insert([{ zona: zonaActiva, numero: mesaNum, nombre_custom: nombreLimpio }])
+      }
     }
   }
 
   const agregarAlTicket = (prod) => {
     const cantAgregar = multiplicador > 0 ? multiplicador : 1
     const ticketExistente = ticketsPorMesa[claveMesaActual] || []
-    const existe = ticketExistente.find((item) => item.id === prod.id)
+    const existe = ticketExistente.find((item) => item.nombre === prod.nombre)
 
     let nuevoTicket = []
     if (existe) {
       nuevoTicket = ticketExistente.map((item) =>
-        item.id === prod.id ? { ...item, cantidad: item.cantidad + cantAgregar } : item
+        item.nombre === prod.nombre ? { ...item, cantidad: item.cantidad + cantAgregar } : item
       )
     } else {
-      nuevoTicket = [...ticketExistente, { ...prod, cantidad: cantAgregar }]
+      nuevoTicket = [...ticketExistente, { ...prod, id: Date.now(), cantidad: cantAgregar }]
     }
 
     setTicketsPorMesa({ ...ticketsPorMesa, [claveMesaActual]: nuevoTicket })
@@ -201,7 +245,7 @@ export default function HomePrincipal() {
       }
 
       setMultiplicador(1)
-      alert(`📝 Comanda enviada: ${zonaActiva} - ${nombreMesaActual} ${notaActual ? `(${notaActual})` : ''}`)
+      alert(`📝 Comanda enviada: ${zonaActiva} - ${nombreMesaActual}`)
     } catch (err) {
       alert(`❌ Error al enviar comanda: ${err.message || 'Error de conexión'}`)
     }
@@ -213,6 +257,8 @@ export default function HomePrincipal() {
     try {
       window.print()
       const mesaId = await obtenerOCrearMesa()
+
+      // Guardar cobrado en BD
       const { data: pedido } = await supabase
         .from('pedidos')
         .insert([{ mesa_id: mesaId, estado: 'cobrado', nota: notaActual }])
@@ -232,6 +278,9 @@ export default function HomePrincipal() {
         await supabase.from('lineas_pedido').insert(lineas)
       }
 
+      // Marcar comandas abiertas como cobradas
+      await supabase.from('pedidos').update({ estado: 'cobrado' }).eq('mesa_id', mesaId).eq('estado', 'abierto')
+
       const copiaTickets = { ...ticketsPorMesa }
       delete copiaTickets[claveMesaActual]
       setTicketsPorMesa(copiaTickets)
@@ -241,22 +290,14 @@ export default function HomePrincipal() {
       setNotasPorMesa(copiaNotas)
 
       setMultiplicador(1)
-      alert('💳 Cobro registrado y ticket emitido')
-    } catch {
-      const copiaTickets = { ...ticketsPorMesa }
-      delete copiaTickets[claveMesaActual]
-      setTicketsPorMesa(copiaTickets)
-
-      const copiaNotas = { ...notasPorMesa }
-      delete copiaNotas[claveMesaActual]
-      setNotasPorMesa(copiaNotas)
-
-      setMultiplicador(1)
+      alert('💳 Cobro registrado')
+    } catch (e) {
+      console.error(e)
     }
   }
 
-  const borrarTicketMesa = () => {
-    if (confirm(`¿Limpiar ticket y descripción de ${zonaActiva} - ${nombreMesaActual}?`)) {
+  const borrarTicketMesa = async () => {
+    if (confirm(`¿Limpiar ticket de ${zonaActiva} - ${nombreMesaActual}?`)) {
       const copiaTickets = { ...ticketsPorMesa }
       delete copiaTickets[claveMesaActual]
       setTicketsPorMesa(copiaTickets)
@@ -264,6 +305,11 @@ export default function HomePrincipal() {
       const copiaNotas = { ...notasPorMesa }
       delete copiaNotas[claveMesaActual]
       setNotasPorMesa(copiaNotas)
+
+      const mesaId = await obtenerOCrearMesa()
+      if (mesaId) {
+        await supabase.from('pedidos').update({ estado: 'cancelado' }).eq('mesa_id', mesaId).eq('estado', 'abierto')
+      }
     }
   }
 
@@ -287,12 +333,11 @@ export default function HomePrincipal() {
 
       <div className="h-screen bg-slate-100 text-slate-800 flex flex-col no-imprimir select-none font-sans overflow-hidden">
         
-        {/* ENCABEZADO DE CONFIGURACIÓN Y MESA */}
+        {/* ENCABEZADO */}
         <header className="bg-amber-500 border-b border-amber-600 px-3 py-1.5 flex justify-between items-center text-slate-900 shadow">
           <div className="flex items-center gap-3">
             <h1 className="font-black text-xl tracking-wide uppercase">JORCO FUSIÓN TPV</h1>
             
-            {/* ZONAS */}
             <div className="flex bg-amber-600/40 p-1 rounded-lg gap-1 border border-amber-700/30">
               {['Terraza', 'Salón', 'Barra'].map((z) => (
                 <button
@@ -313,7 +358,6 @@ export default function HomePrincipal() {
             </div>
           </div>
 
-          {/* SELECTOR DE MESA + RENOMBRAR + ALIAS */}
           <div className="flex items-center gap-2">
             <span className="font-black text-xs uppercase">UBICACIÓN:</span>
             
@@ -335,7 +379,6 @@ export default function HomePrincipal() {
                 })}
               </select>
 
-              {/* BOTÓN PARA CAMBIAR NOMBRE DE MESA */}
               <button
                 onClick={renombrarMesa}
                 title="Cambiar nombre a esta mesa"
@@ -345,7 +388,6 @@ export default function HomePrincipal() {
               </button>
             </div>
 
-            {/* INPUT PARA ALIAS DEL CLIENTE */}
             <input
               type="text"
               placeholder="Ej: Camiseta blanca / Gorra"
@@ -356,12 +398,11 @@ export default function HomePrincipal() {
           </div>
         </header>
 
-        {/* ESTRUCTURA TPV INDUSTRIAL */}
+        {/* CONTENIDO PRINCIPAL */}
         <div className="flex-1 flex overflow-hidden p-2 gap-2">
           
-          {/* IZQUIERDA: TICKET + TECLADO */}
+          {/* TICKET Y TECLADO */}
           <div className="w-4/12 flex flex-col gap-2 bg-slate-200 p-2 rounded border border-slate-300">
-            {/* Visor de Ticket */}
             <div className="flex-1 bg-white border border-slate-300 rounded p-2 overflow-y-auto flex flex-col justify-between shadow-inner">
               <div>
                 <div className="flex justify-between font-black text-xs border-b border-slate-300 pb-1 mb-2 text-slate-500 uppercase">
@@ -396,14 +437,13 @@ export default function HomePrincipal() {
                 )}
               </div>
 
-              {/* Total acumulado */}
               <div className="bg-sky-100 border border-sky-300 p-2 rounded text-right mt-2">
                 <span className="text-xs font-bold text-sky-800 uppercase block">Total a pagar</span>
                 <span className="font-black text-2xl text-sky-950">{calcularTotal().toFixed(2)}€</span>
               </div>
             </div>
 
-            {/* Teclado Numérico */}
+            {/* TECLADO NUMÉRICO */}
             <div className="grid grid-cols-4 gap-1 bg-slate-300 p-1.5 rounded border border-slate-400">
               {[1, 2, 3, 'C', 4, 5, 6, 0, 7, 8, 9].map((val) => (
                 <button
@@ -423,10 +463,9 @@ export default function HomePrincipal() {
             </div>
           </div>
 
-          {/* CENTRO: FAMILIAS + GRILLA CON ICONOS/IMÁGENES */}
+          {/* FAMILIAS Y PRODUCTOS DE BASE DE DATOS */}
           <div className="w-8/12 flex flex-col gap-2">
             
-            {/* Pestañas de Familias */}
             <div className="grid grid-cols-4 gap-1.5">
               {familias.map((f) => (
                 <button
@@ -443,7 +482,6 @@ export default function HomePrincipal() {
               ))}
             </div>
 
-            {/* Productos táctiles */}
             <div className="flex-1 grid grid-cols-4 gap-2 bg-slate-200 p-2 rounded border border-slate-300 overflow-y-auto">
               {productosFiltrados.map((p) => (
                 <button
@@ -465,7 +503,7 @@ export default function HomePrincipal() {
               ))}
             </div>
 
-            {/* BARRA INFERIOR DE ACCIONES RÁPIDAS */}
+            {/* BOTONERA ACCIONES */}
             <div className="grid grid-cols-4 gap-2">
               <button
                 onClick={enviarComanda}
@@ -505,7 +543,7 @@ export default function HomePrincipal() {
         </div>
       </div>
 
-      {/* Ticket Térmico de Impresión */}
+      {/* IMPRESIÓN */}
       <div id="ticket-print">
         <h2 style={{ textAlign: 'center', margin: '0 0 5px 0' }}>JORCO FUSIÓN</h2>
         <h3 style={{ textAlign: 'center', margin: '0 0 10px 0' }}>TICKET DE COMPRA</h3>
