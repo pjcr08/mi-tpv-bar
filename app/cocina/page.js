@@ -27,32 +27,42 @@ export default function CocinaPage() {
         return;
       }
 
-      // 2. Obtener los IDs de pedido únicos y consultar sus mesas con ZONA, NÚMERO y NOTA
+      // 2. Obtener los pedidos asociados
       const pedidoIds = [...new Set(lineas.map((l) => l.pedido_id))];
       const { data: pedidos } = await supabase
         .from('pedidos')
-        .select(`
-          id,
-          nota,
-          mesas (
-            numero,
-            zona
-          )
-        `)
+        .select('id, mesa_id, nota')
         .in('id', pedidoIds);
 
-      // 3. Crear el mapa de nombres para las mesas (incluyendo el ALIAS / NOTA si existe)
+      // 3. Obtener las mesas asociadas a esos pedidos
+      const mesaIds = [...new Set(pedidos?.map((p) => p.mesa_id).filter(Boolean))];
+      let mapaDatosMesas = {};
+
+      if (mesaIds.length > 0) {
+        const { data: mesas } = await supabase
+          .from('mesas')
+          .select('id, numero, zona')
+          .in('id', mesaIds);
+
+        mesas?.forEach((m) => {
+          mapaDatosMesas[m.id] = m;
+        });
+      }
+
+      // 4. Crear el mapa de nombres visuales para cada pedido
       const mapaMesas = {};
       pedidos?.forEach((p) => {
+        const mesaInfo = mapaDatosMesas[p.mesa_id];
         let textoMesa = '';
-        if (p.mesas) {
-          const zona = p.mesas.zona ? p.mesas.zona.toUpperCase() : 'MESA';
-          textoMesa = `${zona} - Mesa ${p.mesas.numero}`;
+
+        if (mesaInfo) {
+          const zona = mesaInfo.zona ? mesaInfo.zona.toUpperCase() : 'MESA';
+          textoMesa = `${zona} - Mesa ${mesaInfo.numero}`;
         } else {
           textoMesa = `Pedido #${p.id}`;
         }
 
-        // Si el pedido tiene un alias/nota, se lo añadimos
+        // Añadir el alias/nota si existe
         if (p.nota) {
           textoMesa += ` (${p.nota})`;
         }
@@ -60,7 +70,7 @@ export default function CocinaPage() {
         mapaMesas[p.id] = textoMesa;
       });
 
-      // 4. Agrupar por pedido
+      // 5. Agrupar las líneas por pedido
       const grupos = {};
       lineas.forEach((linea) => {
         const pId = linea.pedido_id;
@@ -102,9 +112,8 @@ export default function CocinaPage() {
     };
   }, []);
 
-  // 1. MARCAR COMANDA COMPLETA COMO LISTA
+  // MARCAR COMANDA COMPLETA COMO LISTA
   const marcarComandaCompleta = async (pedidoId, items) => {
-    // Quita la tarjeta localmente al instante
     setComandasAgrupadas((prev) => prev.filter((g) => g.pedido_id !== pedidoId));
 
     const ids = items.map((i) => i.id);
@@ -114,12 +123,12 @@ export default function CocinaPage() {
       .in('id', ids);
 
     if (error) {
-      console.error('Error en Supabase (revisa RLS):', error.message);
+      console.error('Error en Supabase:', error.message);
       fetchComandasCocina();
     }
   };
 
-  // 2. BORRAR/CANCELAR COMANDA DE LA BASE DE DATOS
+  // BORRAR COMANDA
   const borrarComanda = async (pedidoId) => {
     if (!confirm('¿Seguro que quieres BORRAR esta comanda de cocina?')) return;
 
@@ -137,7 +146,7 @@ export default function CocinaPage() {
     }
   };
 
-  // 3. MARCAR UN SOLO ÍTEM COMO LISTO
+  // MARCAR UN SOLO ÍTEM COMO LISTO
   const marcarItemListo = async (id) => {
     const { error } = await supabase
       .from('lineas_pedido')
