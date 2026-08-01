@@ -3,466 +3,545 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 
-// Productos rápidos de prueba para la PDA
-const PRODUCTOS_PDA = [
-  { id: 101, nombre: 'Café Solo', precio: 1.20, familia: 'Cafés', destino: 'barra' },
-  { id: 102, nombre: 'Café con Leche', precio: 1.40, familia: 'Cafés', destino: 'barra' },
-  { id: 106, nombre: 'Caña Doble', precio: 2.50, familia: 'Bebidas', destino: 'barra' },
-  { id: 107, nombre: 'Refresco Cola', precio: 2.20, familia: 'Bebidas', destino: 'barra' },
-  { id: 111, nombre: 'Bocad. Jamón', precio: 4.50, familia: 'Comida', destino: 'cocina' },
-  { id: 112, nombre: 'Ración Bravas', precio: 6.00, familia: 'Comida', destino: 'cocina' },
-  { id: 114, nombre: 'Burger Jorco', precio: 8.50, familia: 'Comida', destino: 'cocina' },
+const PRODUCTOS_EJEMPLO = [
+  // CAFÉS
+  { id: 101, nombre: 'Café Solo', precio: 1.20, familia: 'Cafés', destino: 'barra', img: '☕' },
+  { id: 102, nombre: 'Café con Leche', precio: 1.40, familia: 'Cafés', destino: 'barra', img: '🥛' },
+  { id: 103, nombre: 'Cortado', precio: 1.30, familia: 'Cafés', destino: 'barra', img: '☕' },
+  { id: 105, nombre: 'Carajillo', precio: 2.00, familia: 'Cafés', destino: 'barra', img: '🥃' },
+
+  // BEBIDAS
+  { id: 106, nombre: 'Caña Doble', precio: 2.50, familia: 'Bebidas', destino: 'barra', img: '🍺' },
+  { id: 107, nombre: 'Refresco Cola', precio: 2.20, familia: 'Bebidas', destino: 'barra', img: '🥤' },
+  { id: 108, nombre: 'Agua 50cl', precio: 1.50, familia: 'Bebidas', destino: 'barra', img: '💧' },
+  { id: 109, nombre: 'Tercio 1/3', precio: 2.80, familia: 'Bebidas', destino: 'barra', img: '🍾' },
+
+  // COMIDA
+  { id: 111, nombre: 'Bocad. Jamón', precio: 4.50, familia: 'Comida', destino: 'cocina', img: '🥖' },
+  { id: 112, nombre: 'Ración Bravas', precio: 6.00, familia: 'Comida', destino: 'cocina', img: '🍟' },
+  { id: 113, nombre: 'Tortilla', precio: 3.50, familia: 'Comida', destino: 'cocina', img: '🍳' },
+  { id: 114, nombre: 'Burger Jorco', precio: 8.50, familia: 'Comida', destino: 'cocina', img: '🍔' },
+
+  // POSTRES
+  { id: 117, nombre: 'Tarta Queso', precio: 4.00, familia: 'Postres', destino: 'cocina', img: '🍰' },
+  { id: 118, nombre: 'Flan Casero', precio: 3.50, familia: 'Postres', destino: 'cocina', img: '🍮' },
 ]
 
-export default function PDATrabajador() {
-  // --- ESTADOS DE SESIÓN Y VISTA ---
-  const [usuario, setUsuario] = useState(null)
-  const [emailInput, setEmailInput] = useState('')
-  const [passInput, setPassInput] = useState('')
-  const [pestanaActiva, setPestanaActiva] = useState('comandas') // 'comandas' | 'fichaje' | 'turnos' | 'inventario'
+export default function PdaView() {
+  const [zonaActiva, setZonaActiva] = useState('Terraza')
+  const [mesaNum, setMesaNum] = useState(1)
+  
+  // Sincronización Supabase
+  const [nombresMesas, setNombresMesas] = useState({})
+  
+  // Productos y navegación
+  const [productos, setProductos] = useState([])
+  const [familias, setFamilias] = useState([])
+  const [familiaActiva, setFamiliaActiva] = useState('')
 
-  // --- ESTADO DE FICHAJE ---
-  const [fichado, setFichado] = useState(false)
-  const [horaEntrada, setHoraEntrada] = useState(null)
+  // Ticket por mesa
+  const [comandasPorMesa, setComandasPorMesa] = useState({})
+  const [aliasPorMesa, setAliasPorMesa] = useState({})
 
-  // --- ESTADO DE COMANDAS PDA ---
-  const [zona, setZona] = useState('Terraza')
-  const [mesa, setMesa] = useState(1)
-  const [ticketPDA, setTicketPDA] = useState([])
-  const [familiaSeleccionada, setFamiliaSeleccionada] = useState('Todas')
+  // Modales y control de UI
+  const [modalMesaAbierto, setModalMesaAbierto] = useState(false)
+  const [verComandaMobile, setVerComandaMobile] = useState(false)
+  const [multiplicador, setMultiplicador] = useState(1)
 
-  // --- ESTADO DE INVENTARIO / FALTAS ---
-  const [itemFalta, setItemFalta] = useState('')
-  const [listaFaltas, setListaFaltas] = useState([
-    { id: 1, producto: 'Coca-Cola Zero', reportadoPor: 'Carlos', fecha: 'Hoy 12:30' },
-    { id: 2, producto: 'Mayonesa', reportadoPor: 'Lucía', fecha: 'Hoy 13:10' },
-  ])
+  const claveMesaActual = `${zonaActiva}-${mesaNum}`
+  const comandaActual = comandasPorMesa[claveMesaActual] || []
+  const aliasActual = aliasPorMesa[claveMesaActual] || ''
 
-  // --- ESTADO DE TURNOS SEMANALES ---
-  const [turnosDisponibilidad, setTurnosDisponibilidad] = useState({
-    Lunes: 'Mañana',
-    Martes: 'Mañana',
-    Miércoles: 'Libre',
-    Jueves: 'Tarde',
-    Viernes: 'Tarde/Noche',
-    Sábado: 'Completo',
-    Domingo: 'Libre',
-  })
+  useEffect(() => {
+    cargarProductos()
+    cargarNombresMesas()
 
-  // 1. AUTENTICACIÓN
-  const handleLogin = async (e) => {
-    e.preventDefault()
-    if (!emailInput || !passInput) return alert('Introduce tu email y contraseña')
-    
-    // Intento de login real con Supabase Auth (O fallback para presentación)
-    try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: emailInput,
-        password: passInput,
+    // Suscripción Realtime para actualizar mesas si cambian en el TPV
+    const channel = supabase
+      .channel('mesas-pda-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mesas' }, () => {
+        cargarNombresMesas()
       })
-      if (error) {
-        // Fallback simulación presentación rápida
-        setUsuario({ email: emailInput, nombre: emailInput.split('@')[0] })
-      } else {
-        setUsuario(data.user)
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [])
+
+  const cargarProductos = async () => {
+    try {
+      const { data, error } = await supabase.from('productos').select('*')
+      if (error || !data || data.length === 0) {
+        usarProductosEjemplo()
+        return
       }
+      setProductos(data)
+      const fams = [...new Set(data.map((p) => p.familia))].filter(Boolean)
+      setFamilias(fams.length > 0 ? fams : ['Cafés', 'Bebidas', 'Comida', 'Postres'])
+      setFamiliaActiva(fams[0] || 'Cafés')
     } catch {
-      setUsuario({ email: emailInput, nombre: emailInput.split('@')[0] })
+      usarProductosEjemplo()
     }
   }
 
-  const handleLogout = () => {
-    setUsuario(null)
-    setFichado(false)
+  const usarProductosEjemplo = () => {
+    setProductos(PRODUCTOS_EJEMPLO)
+    const fams = [...new Set(PRODUCTOS_EJEMPLO.map((p) => p.familia))]
+    setFamilias(fams)
+    setFamiliaActiva(fams[0])
   }
 
-  // 2. REGISTRO DE FICHAJE
-  const alternarFichaje = async () => {
-    const ahora = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    if (!fichado) {
-      setFichado(true)
-      setHoraEntrada(ahora)
-      alert(`✅ Fichaje de ENTRADA registrado a las ${ahora}`)
-    } else {
-      setFichado(false)
-      alert(`🛑 Fichaje de SALIDA registrado. ¡Buen trabajo!`)
-      setHoraEntrada(null)
+  const cargarNombresMesas = async () => {
+    try {
+      const { data, error } = await supabase.from('mesas').select('zona, numero, nombre_custom')
+      if (data && !error) {
+        const mapa = {}
+        data.forEach((m) => {
+          if (m.nombre_custom) mapa[`${m.zona}-${m.numero}`] = m.nombre_custom
+        })
+        setNombresMesas(mapa)
+      }
+    } catch (e) {
+      console.error(e)
     }
   }
 
-  // 3. AGREGAR A TICKET PDA
-  const agregarItem = (prod) => {
-    const existe = ticketPDA.find((i) => i.id === prod.id)
+  const obtenerNombreMesa = (num, zona = zonaActiva) => {
+    const clave = `${zona}-${num}`
+    return nombresMesas[clave] || `Mesa ${num}`
+  }
+
+  const renombrarMesa = async (num, e) => {
+    e.stopPropagation()
+    const nombreActual = obtenerNombreMesa(num)
+    const nuevoNombre = prompt(`Nuevo nombre para ${zonaActiva} - ${nombreActual}:`, nombreActual)
+
+    if (nuevoNombre !== null) {
+      const nombreLimpio = nuevoNombre.trim()
+      const clave = `${zonaActiva}-${num}`
+
+      setNombresMesas((prev) => ({
+        ...prev,
+        [clave]: nombreLimpio || `Mesa ${num}`,
+      }))
+
+      try {
+        const { data: mesaExistente } = await supabase
+          .from('mesas')
+          .select('id')
+          .eq('zona', zonaActiva)
+          .eq('numero', num)
+          .maybeSingle()
+
+        if (mesaExistente) {
+          await supabase.from('mesas').update({ nombre_custom: nombreLimpio }).eq('id', mesaExistente.id)
+        } else {
+          await supabase.from('mesas').insert([{ zona: zonaActiva, numero: num, nombre_custom: nombreLimpio }])
+        }
+      } catch (err) {
+        console.error('Error guardando nombre:', err)
+      }
+    }
+  }
+
+  // Operaciones de Comanda
+  const agregarAlTicket = (prod) => {
+    const cant = multiplicador > 0 ? multiplicador : 1
+    const actual = comandasPorMesa[claveMesaActual] || []
+    const existe = actual.find((i) => i.id === prod.id)
+
+    let nuevaComanda = []
     if (existe) {
-      setTicketPDA(ticketPDA.map((i) => (i.id === prod.id ? { ...i, cantidad: i.cantidad + 1 } : i)))
+      nuevaComanda = actual.map((i) => (i.id === prod.id ? { ...i, cantidad: i.cantidad + cant } : i))
     } else {
-      setTicketPDA([...ticketPDA, { ...prod, cantidad: 1 }])
+      nuevaComanda = [...actual, { ...prod, cantidad: cant }]
     }
+
+    setComandasPorMesa({ ...comandasPorMesa, [claveMesaActual]: nuevaComanda })
+    setMultiplicador(1)
   }
 
   const cambiarCantidad = (id, delta) => {
-    setTicketPDA(
-      ticketPDA
-        .map((i) => (i.id === id ? { ...i, cantidad: i.cantidad + delta } : i))
-        .filter((i) => i.cantidad > 0)
-    )
+    const actual = comandasPorMesa[claveMesaActual] || []
+    const nuevaComanda = actual
+      .map((i) => (i.id === id ? { ...i, cantidad: i.cantidad + delta } : i))
+      .filter((i) => i.cantidad > 0)
+
+    setComandasPorMesa({ ...comandasPorMesa, [claveMesaActual]: nuevaComanda })
   }
 
-  // 4. ENVIAR COMANDA A SUPABASE (Para PC y Tablets)
-  const enviarComandaPDA = async () => {
-    if (ticketPDA.length === 0) return
+  const calcularTotal = () => {
+    return comandaActual.reduce((sum, item) => sum + Number(item.precio) * item.cantidad, 0)
+  }
+
+  const enviarComandaBD = async () => {
+    if (comandaActual.length === 0) return
 
     try {
-      // Buscar o crear mesa en Supabase
+      let mesaId = null
       const { data: mesaBD } = await supabase
         .from('mesas')
         .select('id')
-        .eq('numero', mesa)
-        .eq('zona', zona)
+        .eq('numero', mesaNum)
+        .eq('zona', zonaActiva)
         .maybeSingle()
 
-      let mesaId = mesaBD?.id
-
-      if (!mesaId) {
+      if (mesaBD) {
+        mesaId = mesaBD.id
+      } else {
         const { data: nuevaMesa } = await supabase
           .from('mesas')
-          .insert([{ numero: mesa, zona }])
+          .insert([{ numero: mesaNum, zona: zonaActiva }])
           .select()
           .single()
-        mesaId = nuevaMesa?.id
+        if (nuevaMesa) mesaId = nuevaMesa.id
       }
 
-      // Crear pedido
       const { data: pedido } = await supabase
         .from('pedidos')
-        .insert([{ mesa_id: mesaId, estado: 'abierto' }])
+        .insert([{ mesa_id: mesaId, estado: 'abierto', nota: aliasActual }])
         .select()
         .single()
 
       if (pedido) {
-        const lineas = ticketPDA.map((item) => ({
+        const lineas = comandaActual.map((item) => ({
           pedido_id: pedido.id,
           producto_nombre: item.nombre,
           precio: item.precio,
           cantidad: item.cantidad,
-          destino: item.destino,
+          destino: item.destino || 'barra',
           estado: 'pendiente',
         }))
         await supabase.from('lineas_pedido').insert(lineas)
       }
 
-      alert(`🚀 Comanda enviada a Cocina/Barra desde PDA (${zona} - Mesa ${mesa})`)
-      setTicketPDA([])
+      alert(`✅ ¡Comanda de ${zonaActiva} - ${obtenerNombreMesa(mesaNum)} enviada!`)
+      setVerComandaMobile(false)
     } catch (err) {
-      alert(`🚀 Comanda enviada localmente (${zona} - Mesa ${mesa})`)
-      setTicketPDA([])
+      alert(`❌ Error al enviar: ${err.message || 'Sin respuesta'}`)
     }
   }
 
-  // 5. ENVIAR AVISO DE FALTAS DE INVENTARIO
-  const reportarFalta = (e) => {
-    e.preventDefault()
-    if (!itemFalta.trim()) return
-    const nuevaFalta = {
-      id: Date.now(),
-      producto: itemFalta,
-      reportadoPor: usuario?.nombre || 'PDA Móvil',
-      fecha: 'Justo ahora',
-    }
-    setListaFaltas([nuevaFalta, ...listaFaltas])
-    setItemFalta('')
-    alert('🔔 Aviso enviado a los jefes e inventario central.')
-  }
+  const productosFiltrados = productos.filter((p) => p.familia === familiaActiva)
+  const totalItems = comandaActual.reduce((acc, item) => acc + item.cantidad, 0)
 
-  // -----------------------------------------------------------------
-  // PANTALLA DE LOGIN TRABAJADOR
-  // -----------------------------------------------------------------
-  if (!usuario) {
-    return (
-      <div className="min-h-screen bg-slate-950 text-white flex flex-col justify-center items-center p-6 font-sans">
-        <div className="w-full max-w-sm bg-slate-900 border border-amber-500/30 rounded-2xl p-6 shadow-2xl">
-          <div className="text-center mb-6">
-            <span className="text-4xl">📲</span>
-            <h1 className="text-2xl font-black text-amber-500 mt-2">JORCO PDA</h1>
-            <p className="text-xs text-slate-400 font-semibold">Acceso de Empleados</p>
-          </div>
-
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <label className="text-xs font-bold text-slate-300 block mb-1">Correo Electrónico</label>
-              <input
-                type="email"
-                value={emailInput}
-                onChange={(e) => setEmailInput(e.target.value)}
-                placeholder="camarero@jorco.com"
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-amber-500"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="text-xs font-bold text-slate-300 block mb-1">Contraseña</label>
-              <input
-                type="password"
-                value={passInput}
-                onChange={(e) => setPassInput(e.target.value)}
-                placeholder="••••••••"
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-amber-500"
-                required
-              />
-            </div>
-
-            <button
-              type="submit"
-              className="w-full py-3.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl uppercase tracking-wider text-sm transition shadow-lg mt-2"
-            >
-              Iniciar Sesión
-            </button>
-          </form>
-        </div>
-      </div>
-    )
-  }
-
-  // -----------------------------------------------------------------
-  // INTERFAZ DE PDA MÓVIL (SESIÓN INICIADA)
-  // -----------------------------------------------------------------
   return (
-    <div className="min-h-screen bg-slate-950 text-white flex flex-col font-sans max-w-md mx-auto border-x border-slate-800 shadow-2xl select-none">
+    <div className="h-screen max-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none overflow-hidden">
       
-      {/* HEADER SUPERIOR PDA */}
-      <header className="bg-slate-900 border-b border-slate-800 p-3 flex justify-between items-center sticky top-0 z-50">
-        <div>
-          <span className="text-xs font-black text-amber-500 block uppercase">JORCO FUSIÓN PDA</span>
-          <span className="text-[11px] text-slate-400 font-semibold">👤 {usuario.nombre || usuario.email}</span>
-        </div>
-        
+      {/* BARRA SUPERIOR ELEGANTE Y TÁCTIL */}
+      <header className="bg-slate-900 border-b border-slate-800 p-2.5 flex justify-between items-center shadow-md">
         <div className="flex items-center gap-2">
-          {/* Indicador de Fichaje */}
-          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${fichado ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40' : 'bg-rose-500/20 text-rose-400 border border-rose-500/40'}`}>
-            {fichado ? `ENTRADA (${horaEntrada})` : 'SIN FICHAR'}
-          </span>
-          <button onClick={handleLogout} className="text-xs bg-slate-800 p-1.5 rounded-lg text-slate-400 hover:text-white">
-            🚪
-          </button>
+          <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
+          <span className="font-black text-amber-500 tracking-wider text-sm">JORCO PDA</span>
         </div>
+
+        {/* BOTÓN MESA ACTIVA (AL PULSAR ABRE MODAL MESAS) */}
+        <button
+          onClick={() => setModalMesaAbierto(true)}
+          className="flex items-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black px-3 py-1.5 rounded-xl text-xs shadow-lg active:scale-95 transition"
+        >
+          <span>📍 {zonaActiva.toUpperCase()}</span>
+          <span className="bg-slate-950/20 px-2 py-0.5 rounded-lg border border-slate-950/20">
+            {obtenerNombreMesa(mesaNum)}
+          </span>
+          <span className="text-[10px]">▼</span>
+        </button>
       </header>
 
-      {/* CONTENIDO SEGÚN PESTAÑA */}
-      <main className="flex-1 overflow-y-auto p-3">
-        
-        {/* ================= PESTAÑA 1: COMANDERO PDA ================= */}
-        {pestanaActiva === 'comandas' && (
-          <div className="space-y-3">
-            {/* Selector Zona y Mesa */}
-            <div className="grid grid-cols-2 gap-2 bg-slate-900 p-2 rounded-xl border border-slate-800">
-              <div>
-                <label className="text-[10px] text-slate-400 font-bold block mb-1">ZONA</label>
-                <select
-                  value={zona}
-                  onChange={(e) => setZona(e.target.value)}
-                  className="w-full bg-slate-950 text-amber-400 font-bold text-sm p-2 rounded-lg border border-slate-700"
-                >
-                  <option value="Terraza">Terraza</option>
-                  <option value="Salón">Salón</option>
-                  <option value="Barra">Barra</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="text-[10px] text-slate-400 font-bold block mb-1">MESA (1-20)</label>
-                <select
-                  value={mesa}
-                  onChange={(e) => setMesa(Number(e.target.value))}
-                  className="w-full bg-slate-950 text-amber-400 font-bold text-sm p-2 rounded-lg border border-slate-700"
-                >
-                  {Array.from({ length: 20 }, (_, i) => i + 1).map((n) => (
-                    <option key={n} value={n}>Mesa {n}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/* Cuadrícula de Productos Rápidos */}
-            <div className="space-y-2">
-              <span className="text-xs font-bold text-slate-400 uppercase">Productos</span>
-              <div className="grid grid-cols-2 gap-2">
-                {PRODUCTOS_PDA.map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => agregarItem(p)}
-                    className="bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-xl p-3 text-left active:scale-95 transition flex flex-col justify-between h-20 shadow"
-                  >
-                    <span className="font-bold text-xs leading-tight text-slate-200">{p.nombre}</span>
-                    <span className="text-amber-400 font-black text-sm">{Number(p.precio).toFixed(2)}€</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Visor de Ticket en Tiempo Real */}
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 mt-4">
-              <h3 className="text-xs font-black text-slate-400 uppercase border-b border-slate-800 pb-1 mb-2">
-                Comanda Actual ({zona} - M{mesa})
-              </h3>
-
-              {ticketPDA.length === 0 ? (
-                <p className="text-center text-slate-600 text-xs py-4 italic">Pulsa productos arriba para añadir</p>
-              ) : (
-                <div className="space-y-2">
-                  {ticketPDA.map((item) => (
-                    <div key={item.id} className="flex justify-between items-center text-xs border-b border-slate-800/40 pb-1">
-                      <div className="flex items-center gap-2">
-                        <button onClick={() => cambiarCantidad(item.id, -1)} className="w-6 h-6 bg-rose-900 rounded text-white font-bold">
-                          -
-                        </button>
-                        <span className="font-bold text-amber-400">{item.cantidad}x</span>
-                        <span className="font-semibold text-slate-200">{item.nombre}</span>
-                        <button onClick={() => cambiarCantidad(item.id, 1)} className="w-6 h-6 bg-emerald-900 rounded text-white font-bold">
-                          +
-                        </button>
-                      </div>
-                      <span className="font-bold">{(item.precio * item.cantidad).toFixed(2)}€</span>
-                    </div>
-                  ))}
-
-                  <button
-                    onClick={enviarComandaPDA}
-                    className="w-full py-3 bg-blue-600 hover:bg-blue-500 font-black text-sm uppercase tracking-wider rounded-xl shadow-lg mt-3 transition"
-                  >
-                    🚀 Enviar Comanda Móvil
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
+      {/* INPUT RÁPIDO PARA ALIAS DEL CLIENTE */}
+      <div className="bg-slate-900/60 border-b border-slate-800/80 px-2.5 py-1.5 flex items-center gap-2">
+        <span className="text-xs">👤</span>
+        <input
+          type="text"
+          placeholder="Descripción del cliente (ej: Gorra roja, Barra alta...)"
+          value={aliasActual}
+          onChange={(e) => setAliasPorMesa({ ...aliasPorMesa, [claveMesaActual]: e.target.value })}
+          className="w-full bg-transparent text-xs text-amber-200 placeholder-slate-500 font-medium focus:outline-none"
+        />
+        {aliasActual && (
+          <button
+            onClick={() => setAliasPorMesa({ ...aliasPorMesa, [claveMesaActual]: '' })}
+            className="text-slate-500 text-xs px-1"
+          >
+            ✕
+          </button>
         )}
+      </div>
 
-        {/* ================= PESTAÑA 2: FICHAJE TRABAJADOR ================= */}
-        {pestanaActiva === 'fichaje' && (
-          <div className="space-y-4 py-4 text-center">
-            <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl">
-              <span className="text-5xl block mb-2">{fichado ? '⏱️' : '🔒'}</span>
-              <h2 className="text-xl font-black text-white">CONTROL DE HORARIO</h2>
-              <p className="text-xs text-slate-400 mt-1">Registra tu jornada laboral para los jefes</p>
+      {/* CARRUSEL DE FAMILIAS / CATEGORÍAS */}
+      <div className="bg-slate-900 border-b border-slate-800 p-1.5 flex gap-1.5 overflow-x-auto no-scrollbar">
+        {familias.map((f) => {
+          const esActiva = familiaActiva === f
+          return (
+            <button
+              key={f}
+              onClick={() => setFamiliaActiva(f)}
+              className={`px-4 py-2 rounded-xl text-xs font-black uppercase whitespace-nowrap transition-all shadow-sm active:scale-95 ${
+                esActiva
+                  ? 'bg-amber-500 text-slate-950 shadow-amber-500/20 shadow-md'
+                  : 'bg-slate-800/80 text-slate-300 border border-slate-700/50 hover:bg-slate-800'
+              }`}
+            >
+              {f}
+            </button>
+          )
+        })}
+      </div>
 
-              <button
-                onClick={alternarFichaje}
-                className={`w-full py-5 rounded-2xl font-black text-lg uppercase tracking-wider shadow-2xl transition mt-6 ${
-                  fichado
-                    ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-900/40'
-                    : 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-900/40'
-                }`}
-              >
-                {fichado ? '🔴 FICHAR SALIDA' : '🟢 FICHAR ENTRADA'}
-              </button>
+      {/* MULTIPLICADOR RÁPIDO (1x, 2x, 3x, 4x, 5x) */}
+      <div className="bg-slate-900/40 px-2 py-1 flex items-center justify-between border-b border-slate-800/50">
+        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Cantidad a marcar:</span>
+        <div className="flex gap-1">
+          {[1, 2, 3, 4, 5, 10].map((num) => (
+            <button
+              key={num}
+              onClick={() => setMultiplicador(num)}
+              className={`w-7 h-6 rounded-lg font-black text-xs transition active:scale-90 ${
+                multiplicador === num
+                  ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                  : 'bg-slate-800 text-slate-400 border border-slate-700/40'
+              }`}
+            >
+              {num}x
+            </button>
+          ))}
+        </div>
+      </div>
 
-              {fichado && (
-                <p className="text-xs font-bold text-emerald-400 mt-4">
-                  Trabajando desde las {horaEntrada} hs
-                </p>
-              )}
+      {/* PARRILLA DE PRODUCTOS TÁCTILES */}
+      <main className="flex-1 p-2 overflow-y-auto grid grid-cols-2 gap-2 align-content-start pb-24">
+        {productosFiltrados.map((p) => (
+          <button
+            key={p.id}
+            onClick={() => agregarAlTicket(p)}
+            className="bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-amber-500/40 p-3 rounded-2xl flex flex-col justify-between h-24 active:scale-95 transition shadow-sm text-left group"
+          >
+            <div className="flex justify-between items-start w-full">
+              <span className="font-bold text-xs text-slate-100 leading-snug line-clamp-2 pr-1">
+                {p.nombre}
+              </span>
+              <span className="text-lg group-active:scale-125 transition-transform">{p.img || '🍽️'}</span>
             </div>
-          </div>
-        )}
 
-        {/* ================= PESTAÑA 3: FALTAS E INVENTARIO ================= */}
-        {pestanaActiva === 'inventario' && (
-          <div className="space-y-4">
-            <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl">
-              <h2 className="text-sm font-black text-amber-500 uppercase mb-2">⚠️ Avisar Falta de Stock</h2>
-              <form onSubmit={reportarFalta} className="flex gap-2">
-                <input
-                  type="text"
-                  value={itemFalta}
-                  onChange={(e) => setItemFalta(e.target.value)}
-                  placeholder="Ej: Falta Mayonesa, Coca-Cola..."
-                  className="flex-1 bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-white focus:outline-none"
-                />
-                <button type="submit" className="bg-amber-500 text-slate-950 font-black px-3 rounded-lg text-xs uppercase">
-                  Avisar
-                </button>
-              </form>
+            <div className="flex justify-between items-end w-full border-t border-slate-800/60 pt-1.5">
+              <span className="text-[9px] font-black uppercase text-slate-500 tracking-wider">
+                {p.destino}
+              </span>
+              <span className="font-black text-sm text-amber-400">
+                {Number(p.precio).toFixed(2)}€
+              </span>
             </div>
-
-            <div className="space-y-2">
-              <span className="text-xs font-bold text-slate-400 uppercase">Lista de Faltas Reportadas</span>
-              {listaFaltas.map((f) => (
-                <div key={f.id} className="bg-slate-900 border border-slate-800 p-3 rounded-xl flex justify-between items-center text-xs">
-                  <div>
-                    <span className="font-bold text-rose-400 block">{f.producto}</span>
-                    <span className="text-[10px] text-slate-500">Por {f.reportadoPor} • {f.fecha}</span>
-                  </div>
-                  <span className="bg-rose-950 text-rose-300 font-bold px-2 py-1 rounded text-[10px]">PENDIENTE</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* ================= PESTAÑA 4: TURNOS Y HORARIOS ================= */}
-        {pestanaActiva === 'turnos' && (
-          <div className="space-y-3">
-            <h2 className="text-sm font-black text-amber-500 uppercase">📅 Tu Horario Semanal</h2>
-            <div className="bg-slate-900 border border-slate-800 rounded-xl divide-y divide-slate-800">
-              {Object.entries(turnosDisponibilidad).map(([dia, turno]) => (
-                <div key={dia} className="p-3 flex justify-between items-center text-xs">
-                  <span className="font-bold text-slate-300">{dia}</span>
-                  <span className={`font-black px-2.5 py-1 rounded-md ${
-                    turno === 'Libre' ? 'bg-slate-800 text-slate-500' : 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
-                  }`}>
-                    {turno}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
+          </button>
+        ))}
       </main>
 
-      {/* BARRA DE NAVEGACIÓN INFERIOR POKET / MÓVIL */}
-      <nav className="bg-slate-900 border-t border-slate-800 grid grid-cols-4 p-1.5 sticky bottom-0">
+      {/* BARRA INFERIOR FLOTANTE DE COMANDA */}
+      <footer className="fixed bottom-0 left-0 right-0 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 p-2.5 flex items-center gap-2 shadow-2xl z-30">
+        
+        {/* BOTÓN RESUMEN TICKET */}
         <button
-          onClick={() => setPestanaActiva('comandas')}
-          className={`py-2 flex flex-col items-center justify-center rounded-xl transition ${
-            pestanaActiva === 'comandas' ? 'bg-amber-500 text-slate-950 font-black' : 'text-slate-400'
-          }`}
+          onClick={() => setVerComandaMobile(!verComandaMobile)}
+          className="flex-1 bg-slate-800 hover:bg-slate-750 border border-slate-700 rounded-xl p-2 flex items-center justify-between active:scale-95 transition"
         >
-          <span className="text-lg">📲</span>
-          <span className="text-[9px] uppercase font-bold">Comandas</span>
+          <div className="flex items-center gap-2">
+            <span className="bg-amber-500 text-slate-950 font-black text-xs w-6 h-6 rounded-lg flex items-center justify-center">
+              {totalItems}
+            </span>
+            <div className="text-left">
+              <span className="text-[10px] font-bold text-slate-400 uppercase block leading-none">Ver Ticket</span>
+              <span className="text-xs font-black text-slate-200">
+                {comandaActual.length === 0 ? 'Vacío' : `${calcularTotal().toFixed(2)}€`}
+              </span>
+            </div>
+          </div>
+          <span className="text-slate-400 text-xs">{verComandaMobile ? '▼' : '▲'}</span>
         </button>
 
+        {/* BOTÓN ENVIAR COMANDA */}
         <button
-          onClick={() => setPestanaActiva('fichaje')}
-          className={`py-2 flex flex-col items-center justify-center rounded-xl transition ${
-            pestanaActiva === 'fichaje' ? 'bg-amber-500 text-slate-950 font-black' : 'text-slate-400'
-          }`}
+          onClick={enviarComandaBD}
+          disabled={comandaActual.length === 0}
+          className="bg-gradient-to-r from-emerald-500 to-emerald-600 disabled:opacity-30 disabled:pointer-events-none text-slate-950 font-black px-4 py-3 rounded-xl text-xs uppercase tracking-wider shadow-lg shadow-emerald-500/20 active:scale-95 transition flex items-center gap-1.5"
         >
-          <span className="text-lg">⏱️</span>
-          <span className="text-[9px] uppercase font-bold">Fichar</span>
+          <span>🚀 ENVIAR</span>
         </button>
+      </footer>
 
-        <button
-          onClick={() => setPestanaActiva('inventario')}
-          className={`py-2 flex flex-col items-center justify-center rounded-xl transition ${
-            pestanaActiva === 'inventario' ? 'bg-amber-500 text-slate-950 font-black' : 'text-slate-400'
-          }`}
-        >
-          <span className="text-lg">📦</span>
-          <span className="text-[9px] uppercase font-bold">Faltas</span>
-        </button>
+      {/* DESPLEGABLE DESDE ABAJO: DETALLE Y EDICIÓN DEL TICKET */}
+      {verComandaMobile && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-40 flex flex-col justify-end">
+          <div className="bg-slate-900 border-t border-slate-800 rounded-t-3xl p-4 max-h-[75vh] flex flex-col shadow-2xl animate-in slide-in-from-bottom duration-200">
+            
+            <div className="flex justify-between items-center mb-3 pb-2 border-b border-slate-800">
+              <div>
+                <h3 className="font-black text-amber-500 text-sm uppercase">
+                  Comanda {zonaActiva} - {obtenerNombreMesa(mesaNum)}
+                </h3>
+                {aliasActual && <p>👤 {aliasActual}</p>}
+              </div>
+              <button
+                onClick={() => setVerComandaMobile(false)}
+                className="w-8 h-8 rounded-full bg-slate-800 text-slate-400 font-bold flex items-center justify-center text-sm"
+              >
+                ✕
+              </button>
+            </div>
 
-        <button
-          onClick={() => setPestanaActiva('turnos')}
-          className={`py-2 flex flex-col items-center justify-center rounded-xl transition ${
-            pestanaActiva === 'turnos' ? 'bg-amber-500 text-slate-950 font-black' : 'text-slate-400'
-          }`}
-        >
-          <span className="text-lg">📅</span>
-          <span className="text-[9px] uppercase font-bold">Turnos</span>
-        </button>
-      </nav>
+            {/* LISTA DE ITEMS EN TICKET */}
+            <div className="flex-1 overflow-y-auto space-y-2 pr-1 mb-3">
+              {comandaActual.length === 0 ? (
+                <div className="py-8 text-center text-slate-500 text-xs italic">
+                  No has añadido ningún producto a esta mesa.
+                </div>
+              ) : (
+                comandaActual.map((item) => (
+                  <div
+                    key={item.id}
+                    className="bg-slate-950 border border-slate-800/80 p-2.5 rounded-xl flex justify-between items-center"
+                  >
+                    <div className="flex-1 pr-2">
+                      <span className="font-bold text-xs text-slate-200 block">{item.nombre}</span>
+                      <span className="text-[10px] text-amber-400 font-semibold">
+                        {Number(item.precio).toFixed(2)}€/unid
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => cambiarCantidad(item.id, -1)}
+                        className="w-7 h-7 bg-red-500/20 hover:bg-red-500/30 text-red-400 font-black rounded-lg text-sm border border-red-500/30 active:scale-90"
+                      >
+                        -
+                      </button>
+                      <span className="font-black text-sm text-slate-100 w-5 text-center">
+                        {item.cantidad}
+                      </span>
+                      <button
+                        onClick={() => cambiarCantidad(item.id, 1)}
+                        className="w-7 h-7 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 font-black rounded-lg text-sm border border-emerald-500/30 active:scale-90"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* TOTAL Y BOTÓN DE ENVÍO */}
+            <div className="border-t border-slate-800 pt-3 flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-bold text-slate-400 uppercase block">Total Comanda</span>
+                <span className="text-xl font-black text-amber-400">{calcularTotal().toFixed(2)}€</span>
+              </div>
+              <button
+                onClick={enviarComandaBD}
+                disabled={comandaActual.length === 0}
+                className="bg-emerald-500 hover:bg-emerald-400 disabled:opacity-30 text-slate-950 font-black px-6 py-3 rounded-xl text-xs uppercase shadow-lg shadow-emerald-500/20 active:scale-95 transition"
+              >
+                🚀 Confirmar y Enviar
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* MODAL PRO: SELECTOR Y RENOMBRADOR DE MESAS TÁCTIL */}
+      {modalMesaAbierto && (
+        <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md z-50 p-4 flex flex-col justify-between animate-in fade-in duration-150">
+          
+          <div>
+            {/* CABECERA DEL MODAL */}
+            <div className="flex justify-between items-center mb-4 pb-2 border-b border-slate-800">
+              <h2 className="font-black text-amber-500 text-base uppercase tracking-wider">
+                Seleccionar / Editar Mesa
+              </h2>
+              <button
+                onClick={() => setModalMesaAbierto(false)}
+                className="w-9 h-9 rounded-xl bg-slate-800 text-slate-300 font-bold text-base flex items-center justify-center"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* SELECTOR DE ZONA TÁCTIL */}
+            <div className="grid grid-cols-3 gap-2 mb-4">
+              {['Terraza', 'Salón', 'Barra'].map((z) => (
+                <button
+                  key={z}
+                  onClick={() => setZonaActiva(z)}
+                  className={`py-2.5 rounded-xl font-black text-xs uppercase transition active:scale-95 ${
+                    zonaActiva === z
+                      ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+                      : 'bg-slate-900 text-slate-400 border border-slate-800'
+                  }`}
+                >
+                  {z}
+                </button>
+              ))}
+            </div>
+
+            {/* PARRILLA DE MESAS (1-20) CON ACCIÓN DE SELECCIONAR Y RENOMBRAR */}
+            <div className="grid grid-cols-4 gap-2 max-h-[55vh] overflow-y-auto pr-1">
+              {Array.from({ length: 20 }, (_, i) => i + 1).map((n) => {
+                const esMesaActual = mesaNum === n
+                const clave = `${zonaActiva}-${n}`
+                const tieneComanda = comandasPorMesa[clave] && comandasPorMesa[clave].length > 0
+                const nombreVisual = obtenerNombreMesa(n)
+
+                return (
+                  <div
+                    key={n}
+                    onClick={() => {
+                      setMesaNum(n)
+                      setModalMesaAbierto(false)
+                    }}
+                    className={`p-2.5 rounded-2xl border flex flex-col justify-between h-20 relative active:scale-95 transition ${
+                      esMesaActual
+                        ? 'bg-amber-500/10 border-amber-500 text-amber-300'
+                        : tieneComanda
+                        ? 'bg-slate-900 border-emerald-500/50 text-emerald-400'
+                        : 'bg-slate-900 border-slate-800 text-slate-300'
+                    }`}
+                  >
+                    <div className="flex justify-between items-start">
+                      <span className="text-[10px] font-black opacity-60">#{n}</span>
+                      
+                      {/* BOTÓN RENOMBRAR DENTRO DE LA TARJETA */}
+                      <button
+                        onClick={(e) => renombrarMesa(n, e)}
+                        title="Renombrar mesa"
+                        className="w-5 h-5 rounded-md bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-amber-400 text-[10px] flex items-center justify-center font-bold border border-slate-700"
+                      >
+                        ✏️
+                      </button>
+                    </div>
+
+                    <div>
+                      <span className="font-extrabold text-xs block truncate">{nombreVisual}</span>
+                      {tieneComanda && (
+                        <span className="text-[9px] font-bold text-emerald-400 flex items-center gap-1">
+                          ● Con Pedido
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+          <button
+            onClick={() => setModalMesaAbierto(false)}
+            className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold py-3.5 rounded-2xl text-xs uppercase tracking-wider mt-2"
+          >
+            Aceptar y Cerrar
+          </button>
+
+        </div>
+      )}
 
     </div>
   )
