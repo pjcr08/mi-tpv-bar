@@ -1,289 +1,209 @@
-'use client';
+'use client'
 
-import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase';
+import { useState, useEffect } from 'react'
+import { supabase } from '@/lib/supabase'
 
-export default function CocinaPage() {
-  const [comandasAgrupadas, setComandasAgrupadas] = useState([]);
-  const [cargando, setCargando] = useState(true);
-
-  const fetchComandasCocina = async () => {
-    try {
-      // 1. Obtener todas las líneas pendientes de cocina
-      const { data: lineas, error: errLineas } = await supabase
-        .from('lineas_pedido')
-        .select('*')
-        .eq('destino', 'cocina')
-        .eq('estado', 'pendiente')
-        .order('created_at', { ascending: true });
-
-      if (errLineas) {
-        console.error('Error lineas:', errLineas.message);
-        return;
-      }
-
-      if (!lineas || lineas.length === 0) {
-        setComandasAgrupadas([]);
-        return;
-      }
-
-      // 2. Obtener los pedidos asociados
-      const pedidoIds = [...new Set(lineas.map((l) => l.pedido_id))];
-      const { data: pedidos } = await supabase
-        .from('pedidos')
-        .select('id, mesa_id, nota')
-        .in('id', pedidoIds);
-
-      // 3. Obtener las mesas asociadas a esos pedidos
-      const mesaIds = [...new Set(pedidos?.map((p) => p.mesa_id).filter(Boolean))];
-      let mapaDatosMesas = {};
-
-      if (mesaIds.length > 0) {
-        const { data: mesas } = await supabase
-          .from('mesas')
-          .select('id, numero, zona')
-          .in('id', mesaIds);
-
-        mesas?.forEach((m) => {
-          mapaDatosMesas[m.id] = m;
-        });
-      }
-
-      // 4. Crear el mapa de nombres visuales para cada pedido
-      const mapaMesas = {};
-      pedidos?.forEach((p) => {
-        const mesaInfo = mapaDatosMesas[p.mesa_id];
-        let textoMesa = '';
-
-        if (mesaInfo) {
-          const zona = mesaInfo.zona ? mesaInfo.zona.toUpperCase() : 'MESA';
-          textoMesa = `${zona} - Mesa ${mesaInfo.numero}`;
-        } else {
-          textoMesa = `Pedido #${p.id}`;
-        }
-
-        // Añadir el alias/nota si existe
-        if (p.nota) {
-          textoMesa += ` (${p.nota})`;
-        }
-
-        mapaMesas[p.id] = textoMesa;
-      });
-
-      // 5. Agrupar las líneas por pedido
-      const grupos = {};
-      lineas.forEach((linea) => {
-        const pId = linea.pedido_id;
-        if (!grupos[pId]) {
-          grupos[pId] = {
-            pedido_id: pId,
-            mesa: mapaMesas[pId] || `Pedido #${pId}`,
-            hora: linea.created_at,
-            items: []
-          };
-        }
-        grupos[pId].items.push(linea);
-      });
-
-      setComandasAgrupadas(Object.values(grupos));
-    } catch (err) {
-      console.error('Error general:', err);
-    } finally {
-      setCargando(false);
-    }
-  };
+export default function CocinaView() {
+  const [pedidos, setPedidos] = useState([])
+  const [cargando, setCargando] = useState(true)
 
   useEffect(() => {
-    fetchComandasCocina();
+    cargarPedidosCocina()
 
+    // Suscripción en tiempo real a la cocina
     const channel = supabase
-      .channel('realtime_cocina')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'lineas_pedido' },
-        () => {
-          fetchComandasCocina();
-        }
-      )
-      .subscribe();
+      .channel('cocina-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, () => {
+        cargarPedidosCocina()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'lineas_pedido' }, () => {
+        cargarPedidosCocina()
+      })
+      .subscribe()
 
     return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
-
-  // MARCAR COMANDA COMPLETA COMO LISTA
-  const marcarComandaCompleta = async (pedidoId, items) => {
-    setComandasAgrupadas((prev) => prev.filter((g) => g.pedido_id !== pedidoId));
-
-    const ids = items.map((i) => i.id);
-    const { error } = await supabase
-      .from('lineas_pedido')
-      .update({ estado: 'listo' })
-      .in('id', ids);
-
-    if (error) {
-      console.error('Error en Supabase:', error.message);
-      fetchComandasCocina();
+      supabase.removeChannel(channel)
     }
-  };
+  }, [])
 
-  // BORRAR COMANDA
-  const borrarComanda = async (pedidoId) => {
-    if (!confirm('¿Seguro que quieres BORRAR esta comanda de cocina?')) return;
+  const cargarPedidosCocina = async () => {
+    try {
+      // 1. Obtener pedidos abiertos
+      const { data: pedidosData, error: pedidosErr } = await supabase
+        .from('pedidos')
+        .select(`
+          id,
+          nota,
+          created_at,
+          mesas (
+            zona,
+            numero,
+            nombre_custom
+          )
+        `)
+        .eq('estado', 'abierto')
+        .order('created_at', { ascending: true })
 
-    setComandasAgrupadas((prev) => prev.filter((g) => g.pedido_id !== pedidoId));
+      if (pedidosErr) throw pedidosErr
 
-    const { error } = await supabase
-      .from('lineas_pedido')
-      .delete()
-      .eq('pedido_id', pedidoId)
-      .eq('destino', 'cocina');
+      if (!pedidosData || pedidosData.length === 0) {
+        setPedidos([])
+        setCargando(false)
+        return
+      }
 
-    if (error) {
-      console.error('Error al borrar comanda:', error.message);
-      fetchComandasCocina();
+      // 2. Obtener las líneas de pedido destinadas a cocina o pendients
+      const pedidoIds = pedidosData.map((p) => p.id)
+      const { data: lineasData, error: lineasErr } = await supabase
+        .from('lineas_pedido')
+        .select('*')
+        .in('pedido_id', pedidoIds)
+        .eq('destino', 'cocina')
+
+      if (lineasErr) throw lineasErr
+
+      // 3. Agrupar líneas con sus respectivos pedidos
+      const pedidosConLineas = pedidosData
+        .map((ped) => {
+          const lineas = (lineasData || []).filter((l) => l.pedido_id === ped.id)
+          return { ...ped, lineas }
+        })
+        .filter((ped) => ped.lineas.length > 0) // Mostrar solo los que tengan productos de cocina
+
+      setPedidos(pedidosConLineas)
+    } catch (err) {
+      console.error('Error cargando cocina:', err)
+    } finally {
+      setCargando(false)
     }
-  };
+  }
 
-  // MARCAR UN SOLO ÍTEM COMO LISTO
-  const marcarItemListo = async (id) => {
-    const { error } = await supabase
-      .from('lineas_pedido')
-      .update({ estado: 'listo' })
-      .eq('id', id);
+  // Marcar una línea individual como lista
+  const toggleLineaEstado = async (lineaId, estadoActual) => {
+    const nuevoEstado = estadoActual === 'listo' ? 'pendiente' : 'listo'
+    setPedidos((prev) =>
+      prev.map((p) => ({
+        ...p,
+        lineas: p.lineas.map((l) => (l.id === lineaId ? { ...l, estado: nuevoEstado } : l)),
+      }))
+    )
 
-    if (!error) {
-      fetchComandasCocina();
-    }
-  };
+    await supabase.from('lineas_pedido').update({ estado: nuevoEstado }).eq('id', lineaId)
+  }
 
-  const obtenerHora = (fechaIso) => {
-    if (!fechaIso) return '---';
-    const d = new Date(fechaIso);
-    return isNaN(d.getTime()) ? '---' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
+  // Marcar toda la comanda como lista
+  const completarPedido = async (pedidoId) => {
+    setPedidos((prev) => prev.filter((p) => p.id !== pedidoId))
+    await supabase.from('lineas_pedido').update({ estado: 'listo' }).eq('pedido_id', pedidoId).eq('destino', 'cocina')
+  }
 
   return (
-    <div style={{ padding: '20px', backgroundColor: '#121212', color: '#fff', minHeight: '100vh', fontFamily: 'sans-serif' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-        <h1 style={{ color: '#e67e22', margin: 0, fontSize: '2rem' }}>👨‍🍳 COMANDAS DE COCINA</h1>
-        <button 
-          onClick={fetchComandasCocina}
-          style={{ padding: '10px 18px', backgroundColor: '#333', color: '#fff', border: '1px solid #555', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-        >
-          🔄 Recargar
-        </button>
-      </div>
+    <div className="min-h-screen bg-slate-950 text-slate-100 p-4 font-sans select-none">
+      <header className="flex justify-between items-center mb-6 pb-3 border-b border-slate-800">
+        <div className="flex items-center gap-3">
+          <span className="text-3xl">👨‍🍳</span>
+          <div>
+            <h1 className="text-xl font-black text-amber-500 tracking-wider">COMANDAS DE COCINA</h1>
+            <p className="text-xs text-slate-400 font-medium">Pedidos entrantes en tiempo real</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl">
+          <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
+          <span className="text-xs font-bold text-slate-300">{pedidos.length} Activas</span>
+        </div>
+      </header>
 
       {cargando ? (
-        <p>Cargando comandas...</p>
-      ) : comandasAgrupadas.length === 0 ? (
-        <div style={{ padding: '50px', textAlign: 'center', background: '#1e1e1e', borderRadius: '8px', border: '1px dashed #444' }}>
-          <h2 style={{ color: '#aaa' }}>No hay comandas pendientes en cocina</h2>
+        <div className="text-center py-20 text-slate-500 text-sm">Cargando comandas...</div>
+      ) : pedidos.length === 0 ? (
+        <div className="text-center py-20 text-slate-500 font-bold text-sm">
+          🎉 ¡Todo al día! No hay marchas pendientes en cocina.
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' }}>
-          {comandasAgrupadas.map((grupo) => (
-            <div 
-              key={grupo.pedido_id} 
-              style={{ 
-                border: '2px solid #e67e22', 
-                borderRadius: '10px', 
-                padding: '16px', 
-                background: '#1e1e1e',
-                display: 'flex',
-                flexDirection: 'column',
-                justify: 'space-between'
-              }}
-            >
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #333', paddingBottom: '10px', marginBottom: '12px' }}>
-                  <span style={{ fontSize: '1.3rem', fontWeight: 'bold', color: '#e67e22' }}>
-                    {grupo.mesa}
-                  </span>
-                  <span style={{ fontSize: '0.9rem', color: '#f39c12', fontWeight: 'bold', background: '#2c2c2c', padding: '4px 8px', borderRadius: '4px' }}>
-                    🕒 {obtenerHora(grupo.hora)}
-                  </span>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {pedidos.map((ped) => {
+            const nombreMesa = ped.mesas?.nombre_custom || `Mesa ${ped.mesas?.numero || ''}`
+            const zona = ped.mesas?.zona || 'Terraza'
+            const hora = ped.created_at
+              ? new Date(ped.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+              : '--:--'
+            const todoListo = ped.lineas.every((l) => l.estado === 'listo')
+
+            return (
+              <div
+                key={ped.id}
+                className={`bg-slate-900 border-2 rounded-2xl p-4 flex flex-col justify-between shadow-xl transition-all ${
+                  todoListo ? 'border-emerald-500/50 bg-slate-900/60' : 'border-amber-500/80'
+                }`}
+              >
+                <div>
+                  {/* CABECERA CON ZONA, MESA Y ALIAS DEL CLIENTE */}
+                  <div className="flex justify-between items-start mb-3 pb-2 border-b border-slate-800">
+                    <div>
+                      <span className="font-black text-amber-500 text-base uppercase block tracking-wide">
+                        {zona.toUpperCase()} - {nombreMesa}
+                      </span>
+                      {/* 🔴 ALIAS DEL CLIENTE (PEPITO, GORRA ROJA, ETC) */}
+                      {ped.nota && (
+                        <span className="inline-block mt-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-md text-xs font-black">
+                          👤 {ped.nota}
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[11px] font-bold text-slate-400 bg-slate-800 px-2 py-1 rounded-lg">
+                      ⏱️ {hora}
+                    </span>
+                  </div>
+
+                  {/* LISTA DE PLATOS */}
+                  <div className="space-y-2 mb-4">
+                    {ped.lineas.map((linea) => {
+                      const esListo = linea.estado === 'listo'
+                      return (
+                        <button
+                          key={linea.id}
+                          onClick={() => toggleLineaEstado(linea.id, linea.estado)}
+                          className={`w-full p-2.5 rounded-xl border flex items-center justify-between text-left transition active:scale-95 ${
+                            esListo
+                              ? 'bg-slate-950/40 border-slate-800 text-slate-500 line-through'
+                              : 'bg-slate-950 border-slate-800 text-slate-100 font-bold hover:border-amber-500/40'
+                          }`}
+                        >
+                          <span className="text-xs">
+                            <strong className="text-amber-400 mr-1.5">{linea.cantidad}x</strong>
+                            {linea.producto_nombre}
+                          </span>
+                          <span
+                            className={`w-6 h-6 rounded-lg text-xs font-black flex items-center justify-center border ${
+                              esListo
+                                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
+                                : 'bg-slate-800 text-slate-400 border-slate-700'
+                            }`}
+                          >
+                            {esListo ? '✓' : ''}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
                 </div>
 
-                <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 15px 0' }}>
-                  {grupo.items.map((item) => (
-                    <li 
-                      key={item.id} 
-                      style={{ 
-                        display: 'flex', 
-                        justifyContent: 'space-between', 
-                        alignItems: 'center', 
-                        padding: '8px 0', 
-                        borderBottom: '1px dashed #333',
-                        fontSize: '1.1rem',
-                        fontWeight: 'bold'
-                      }}
-                    >
-                      <span>
-                        <span style={{ color: '#e67e22', marginRight: '8px' }}>{item.cantidad || 1}x</span>
-                        {item.producto_nombre}
-                      </span>
-                      <button
-                        onClick={() => marcarItemListo(item.id)}
-                        style={{
-                          backgroundColor: '#27ae60',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '4px',
-                          padding: '4px 8px',
-                          fontSize: '0.85rem',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        ✔
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              {/* ACCIONES DE COCINA */}
-              <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                {/* BOTÓN COMPLETAR TODO */}
                 <button
-                  onClick={() => marcarComandaCompleta(grupo.pedido_id, grupo.items)}
-                  style={{
-                    flex: 1,
-                    padding: '14px',
-                    backgroundColor: '#27ae60',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '6px',
-                    fontWeight: 'bold',
-                    fontSize: '0.95rem',
-                    cursor: 'pointer'
-                  }}
+                  onClick={() => completarPedido(ped.id)}
+                  className={`w-full py-3 rounded-xl font-black text-xs uppercase tracking-wider transition active:scale-95 flex items-center justify-center gap-2 ${
+                    todoListo
+                      ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-lg shadow-emerald-500/20'
+                      : 'bg-slate-800 hover:bg-slate-750 text-slate-300 border border-slate-700'
+                  }`}
                 >
-                  ✔ LISTA COMPLETA
-                </button>
-
-                <button
-                  onClick={() => borrarComanda(grupo.pedido_id)}
-                  title="Borrar comanda"
-                  style={{
-                    padding: '14px',
-                    backgroundColor: '#e74c3c',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '6px',
-                    fontWeight: 'bold',
-                    fontSize: '1rem',
-                    cursor: 'pointer'
-                  }}
-                >
-                  🗑️
+                  <span>✓ LISTA COMPLETA</span>
                 </button>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>
-  );
+  )
 }
