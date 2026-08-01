@@ -42,16 +42,27 @@ export default function HomePrincipal() {
   const [zonaActiva, setZonaActiva] = useState('Terraza')
   const [mesaNum, setMesaNum] = useState(1)
 
+  // NOMBRES PERSONALIZADOS PARA MESAS (ej: 'Terraza-1': 'Mesa VIP')
+  const [nombresMesas, setNombresMesas] = useState({})
+
   // ESTADO DE TICKETS Y NOTAS PERSISTENTES POR MESA
   const [ticketsPorMesa, setTicketsPorMesa] = useState({})
-  const [notasPorMesa, setNotasPorMesa] = useState({}) // <-- NUEVO: Guardar notas por mesa
+  const [notasPorMesa, setNotasPorMesa] = useState({})
 
   // Multiplicador / Unidades
   const [multiplicador, setMultiplicador] = useState(1)
 
   const claveMesaActual = `${zonaActiva}-${mesaNum}`
   const ticketActual = ticketsPorMesa[claveMesaActual] || []
-  const notaActual = notasPorMesa[claveMesaActual] || '' // <-- NUEVO: Nota o alias de la mesa actual
+  const notaActual = notasPorMesa[claveMesaActual] || ''
+
+  // Obtener el nombre visual de la mesa (personalizado o predeterminado)
+  const obtenerNombreMesa = (num) => {
+    const clave = `${zonaActiva}-${num}`
+    return nombresMesas[clave] || `Mesa ${num}`
+  }
+
+  const nombreMesaActual = obtenerNombreMesa(mesaNum)
 
   useEffect(() => {
     cargarProductos()
@@ -84,9 +95,22 @@ export default function HomePrincipal() {
     setFamiliaActiva(fams[0])
   }
 
-  // Función para cambiar la nota/alias de la mesa actual
+  // Cambiar la nota/alias de la mesa actual
   const handleNotaChange = (nuevaNota) => {
     setNotasPorMesa({ ...notasPorMesa, [claveMesaActual]: nuevaNota })
+  }
+
+  // Renombrar la mesa actual
+  const renombrarMesa = () => {
+    const nombreActual = obtenerNombreMesa(mesaNum)
+    const nuevoNombre = prompt(`Introduce un nuevo nombre para ${zonaActiva} - ${nombreActual}:`, nombreActual)
+
+    if (nuevoNombre !== null && nuevoNombre.trim() !== '') {
+      setNombresMesas({
+        ...nombresMesas,
+        [claveMesaActual]: nuevoNombre.trim(),
+      })
+    }
   }
 
   const agregarAlTicket = (prod) => {
@@ -177,7 +201,7 @@ export default function HomePrincipal() {
       }
 
       setMultiplicador(1)
-      alert(`📝 Comanda enviada: ${zonaActiva} - Mesa ${mesaNum} ${notaActual ? `(${notaActual})` : ''}`)
+      alert(`📝 Comanda enviada: ${zonaActiva} - ${nombreMesaActual} ${notaActual ? `(${notaActual})` : ''}`)
     } catch (err) {
       alert(`❌ Error al enviar comanda: ${err.message || 'Error de conexión'}`)
     }
@@ -232,7 +256,7 @@ export default function HomePrincipal() {
   }
 
   const borrarTicketMesa = () => {
-    if (confirm(`¿Limpiar ticket y descripción de ${zonaActiva} - Mesa ${mesaNum}?`)) {
+    if (confirm(`¿Limpiar ticket y descripción de ${zonaActiva} - ${nombreMesaActual}?`)) {
       const copiaTickets = { ...ticketsPorMesa }
       delete copiaTickets[claveMesaActual]
       setTicketsPorMesa(copiaTickets)
@@ -244,8 +268,6 @@ export default function HomePrincipal() {
   }
 
   const productosFiltrados = productos.filter((p) => p.familia === familiaActiva)
-
-  // Generar mesas del 1 al 20 para la zona seleccionada
   const opcionesMesas = Array.from({ length: 20 }, (_, i) => i + 1)
 
   return (
@@ -291,26 +313,39 @@ export default function HomePrincipal() {
             </div>
           </div>
 
-          {/* SELECTOR DE MESA + ALIAS / CLIENTE */}
+          {/* SELECTOR DE MESA + RENOMBRAR + ALIAS */}
           <div className="flex items-center gap-2">
-            <span className="font-black text-xs uppercase">SELECCIONAR MESA:</span>
-            <select
-              value={mesaNum}
-              onChange={(e) => setMesaNum(Number(e.target.value))}
-              className="bg-white text-slate-900 font-black px-3 py-1 rounded border-2 border-slate-900 text-base shadow"
-            >
-              {opcionesMesas.map((n) => {
-                const clave = `${zonaActiva}-${n}`
-                const tieneItems = ticketsPorMesa[clave] && ticketsPorMesa[clave].length > 0
-                return (
-                  <option key={n} value={n}>
-                    Mesa {n} {tieneItems ? '🔴 (Abierta)' : ''}
-                  </option>
-                )
-              })}
-            </select>
+            <span className="font-black text-xs uppercase">UBICACIÓN:</span>
+            
+            <div className="flex items-center gap-1">
+              <select
+                value={mesaNum}
+                onChange={(e) => setMesaNum(Number(e.target.value))}
+                className="bg-white text-slate-900 font-black px-3 py-1 rounded border-2 border-slate-900 text-base shadow"
+              >
+                {opcionesMesas.map((n) => {
+                  const clave = `${zonaActiva}-${n}`
+                  const tieneItems = ticketsPorMesa[clave] && ticketsPorMesa[clave].length > 0
+                  const nombreVisual = obtenerNombreMesa(n)
+                  return (
+                    <option key={n} value={n}>
+                      {nombreVisual} {tieneItems ? '🔴 (Abierta)' : ''}
+                    </option>
+                  )
+                })}
+              </select>
 
-            {/* NUEVO: INPUT PARA EL ALIAS O DESCRIPCIÓN DEL CLIENTE */}
+              {/* BOTÓN PARA CAMBIAR NOMBRE DE MESA */}
+              <button
+                onClick={renombrarMesa}
+                title="Cambiar nombre a esta mesa"
+                className="bg-slate-900 hover:bg-slate-800 text-amber-400 font-bold p-1.5 rounded border-2 border-slate-900 text-sm shadow active:scale-95 transition"
+              >
+                ✏️
+              </button>
+            </div>
+
+            {/* INPUT PARA ALIAS DEL CLIENTE */}
             <input
               type="text"
               placeholder="Ej: Camiseta blanca / Gorra"
@@ -335,15 +370,14 @@ export default function HomePrincipal() {
                 </div>
                 {ticketActual.length === 0 ? (
                   <div className="text-center text-slate-400 text-xs mt-10 italic">
-                    {zonaActiva} - Mesa {mesaNum} {notaActual ? `("${notaActual}")` : ''} sin productos
+                    {zonaActiva} - {nombreMesaActual} {notaActual ? `("${notaActual}")` : ''} sin productos
                   </div>
                 ) : (
                   <>
-                    {notaActual && (
-                      <div className="bg-amber-100 border border-amber-300 text-amber-900 text-xs font-bold px-2 py-1 rounded mb-2">
-                        👤 Cliente: {notaActual}
-                      </div>
-                    )}
+                    <div className="bg-slate-100 border border-slate-300 text-slate-800 text-xs font-bold px-2 py-1 rounded mb-2 flex justify-between">
+                      <span>📍 {zonaActiva} - {nombreMesaActual}</span>
+                      {notaActual && <span>👤 {notaActual}</span>}
+                    </div>
                     {ticketActual.map((item) => (
                       <div key={item.id} className="flex justify-between items-center text-sm border-b border-slate-100 py-1.5">
                         <div className="flex items-center gap-1.5">
@@ -409,7 +443,7 @@ export default function HomePrincipal() {
               ))}
             </div>
 
-            {/* Productos táctiles estilo TPV comercial */}
+            {/* Productos táctiles */}
             <div className="flex-1 grid grid-cols-4 gap-2 bg-slate-200 p-2 rounded border border-slate-300 overflow-y-auto">
               {productosFiltrados.map((p) => (
                 <button
@@ -475,7 +509,7 @@ export default function HomePrincipal() {
       <div id="ticket-print">
         <h2 style={{ textAlign: 'center', margin: '0 0 5px 0' }}>JORCO FUSIÓN</h2>
         <h3 style={{ textAlign: 'center', margin: '0 0 10px 0' }}>TICKET DE COMPRA</h3>
-        <p><strong>Zona:</strong> {zonaActiva} | <strong>Mesa:</strong> {mesaNum}</p>
+        <p><strong>Zona:</strong> {zonaActiva} | <strong>Mesa:</strong> {nombreMesaActual}</p>
         {notaActual && <p><strong>Cliente:</strong> {notaActual}</p>}
         <hr />
         {ticketActual.map((item) => (
