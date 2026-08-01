@@ -3,30 +3,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 
-const PRODUCTOS_EJEMPLO = [
-  // CAFÉS
-  { id: 101, nombre: 'Café Solo', precio: 1.20, familia: 'Cafés', destino: 'barra', img: '☕' },
-  { id: 102, nombre: 'Café con Leche', precio: 1.40, familia: 'Cafés', destino: 'barra', img: '🥛' },
-  { id: 103, nombre: 'Cortado', precio: 1.30, familia: 'Cafés', destino: 'barra', img: '☕' },
-  { id: 105, nombre: 'Carajillo', precio: 2.00, familia: 'Cafés', destino: 'barra', img: '🥃' },
-
-  // BEBIDAS
-  { id: 106, nombre: 'Caña Doble', precio: 2.50, familia: 'Bebidas', destino: 'barra', img: '🍺' },
-  { id: 107, nombre: 'Refresco Cola', precio: 2.20, familia: 'Bebidas', destino: 'barra', img: '🥤' },
-  { id: 108, nombre: 'Agua 50cl', precio: 1.50, familia: 'Bebidas', destino: 'barra', img: '💧' },
-  { id: 109, nombre: 'Tercio 1/3', precio: 2.80, familia: 'Bebidas', destino: 'barra', img: '🍾' },
-
-  // COMIDA
-  { id: 111, nombre: 'Bocad. Jamón', precio: 4.50, familia: 'Comida', destino: 'cocina', img: '🥖' },
-  { id: 112, nombre: 'Ración Bravas', precio: 6.00, familia: 'Comida', destino: 'cocina', img: '🍟' },
-  { id: 113, nombre: 'Tortilla', precio: 3.50, familia: 'Comida', destino: 'cocina', img: '🍳' },
-  { id: 114, nombre: 'Burger Jorco', precio: 8.50, familia: 'Comida', destino: 'cocina', img: '🍔' },
-
-  // POSTRES
-  { id: 117, nombre: 'Tarta Queso', precio: 4.00, familia: 'Postres', destino: 'cocina', img: '🍰' },
-  { id: 118, nombre: 'Flan Casero', precio: 3.50, familia: 'Postres', destino: 'cocina', img: '🍮' },
-]
-
 export default function PdaView() {
   // Autenticación
   const [usuario, setUsuario] = useState(null)
@@ -54,7 +30,7 @@ export default function PdaView() {
     'Festivo': [],
   })
 
-  // Estados previos TPV / PDA
+  // Estados TPV / PDA
   const [zonaActiva, setZonaActiva] = useState('Terraza')
   const [mesaNum, setMesaNum] = useState(1)
   const [nombresMesas, setNombresMesas] = useState({})
@@ -65,7 +41,6 @@ export default function PdaView() {
   const [aliasPorMesa, setAliasPorMesa] = useState({})
   const [modalMesaAbierto, setModalMesaAbierto] = useState(false)
   const [verComandaMobile, setVerComandaMobile] = useState(false)
-  const [multiplicador, setMultiplicador] = useState(1)
 
   const claveMesaActual = `${zonaActiva}-${mesaNum}`
   const comandaActual = comandasPorMesa[claveMesaActual] || []
@@ -87,14 +62,12 @@ export default function PdaView() {
     }
   }, [])
 
-  // Login Handler
   const handleLogin = (e) => {
     e.preventDefault()
     if (!emailInput || !passInput) {
       setErrorLogin('Por favor, rellena email y contraseña.')
       return
     }
-    // Simulamos login correcto (puedes conectar supabase.auth si lo prefieres)
     const nombreUsuario = emailInput.split('@')[0]
     setUsuario({ email: emailInput, nombre: nombreUsuario.toUpperCase() })
     setErrorLogin('')
@@ -106,7 +79,6 @@ export default function PdaView() {
     setPassInput('')
   }
 
-  // Fichaje Handler
   const toggleFichaje = () => {
     const ahora = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     if (!fichado) {
@@ -120,7 +92,6 @@ export default function PdaView() {
     }
   }
 
-  // Stock / Faltas Handler
   const toggleFaltaProducto = (nombreProd) => {
     if (listaFaltas.includes(nombreProd)) {
       setListaFaltas(listaFaltas.filter((item) => item !== nombreProd))
@@ -143,7 +114,6 @@ export default function PdaView() {
     setModalStockAbierto(false)
   }
 
-  // Turnos Handler
   const toggleApuntarseTurno = (turnoNombre) => {
     if (!usuario) return
     const listaActual = turnos[turnoNombre] || []
@@ -159,28 +129,19 @@ export default function PdaView() {
     setTurnos({ ...turnos, [turnoNombre]: nuevaLista })
   }
 
-  // Cargar datos
   const cargarProductos = async () => {
     try {
       const { data, error } = await supabase.from('productos').select('*')
-      if (error || !data || data.length === 0) {
-        usarProductosEjemplo()
-        return
-      }
+      if (error || !data) return
       setProductos(data)
       const fams = [...new Set(data.map((p) => p.familia))].filter(Boolean)
-      setFamilias(fams.length > 0 ? fams : ['Cafés', 'Bebidas', 'Comida', 'Postres'])
-      setFamiliaActiva(fams[0] || 'Cafés')
-    } catch {
-      usarProductosEjemplo()
+      if (fams.length > 0) {
+        setFamilias(fams)
+        setFamiliaActiva(fams[0])
+      }
+    } catch (err) {
+      console.error('Error cargando productos:', err)
     }
-  }
-
-  const usarProductosEjemplo = () => {
-    setProductos(PRODUCTOS_EJEMPLO)
-    const fams = [...new Set(PRODUCTOS_EJEMPLO.map((p) => p.familia))]
-    setFamilias(fams)
-    setFamiliaActiva(fams[0])
   }
 
   const cargarNombresMesas = async () => {
@@ -236,21 +197,18 @@ export default function PdaView() {
     }
   }
 
-  // Operaciones de Comanda
   const agregarAlTicket = (prod) => {
-    const cant = multiplicador > 0 ? multiplicador : 1
     const actual = comandasPorMesa[claveMesaActual] || []
     const existe = actual.find((i) => i.id === prod.id)
 
     let nuevaComanda = []
     if (existe) {
-      nuevaComanda = actual.map((i) => (i.id === prod.id ? { ...i, cantidad: i.cantidad + cant } : i))
+      nuevaComanda = actual.map((i) => (i.id === prod.id ? { ...i, cantidad: i.cantidad + 1 } : i))
     } else {
-      nuevaComanda = [...actual, { ...prod, cantidad: cant }]
+      nuevaComanda = [...actual, { ...prod, cantidad: 1 }]
     }
 
     setComandasPorMesa({ ...comandasPorMesa, [claveMesaActual]: nuevaComanda })
-    setMultiplicador(1)
   }
 
   const cambiarCantidad = (id, delta) => {
@@ -307,58 +265,61 @@ export default function PdaView() {
         await supabase.from('lineas_pedido').insert(lineas)
       }
 
-      alert(`✅ ¡Comanda de ${zonaActiva} - ${obtenerNombreMesa(mesaNum)} enviada!`)
+      // Limpiar ticket local tras enviar
+      const copComandas = { ...comandasPorMesa }
+      delete copComandas[claveMesaActual]
+      setComandasPorMesa(copComandas)
+
+      alert(`✅ ¡Comanda enviada a la pantalla principal!`)
       setVerComandaMobile(false)
     } catch (err) {
-      alert(`❌ Error al enviar: ${err.message || 'Sin respuesta'}`)
+      alert(`❌ Error al enviar: ${err.message || 'Sin conexión'}`)
     }
   }
 
   const productosFiltrados = productos.filter((p) => p.familia === familiaActiva)
-  const totalItems = comandaActual.reduce((acc, item) => acc + item.cantidad, 0)
+  const opcionesMesas = Array.from({ length: 20 }, (_, i) => i + 1)
 
-  // SI NO HAY USUARIO AUTENTICADO: MOSTRAR PANTALLA DE LOGIN
   if (!usuario) {
     return (
-      <div className="h-screen max-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center p-6 font-sans select-none">
-        <div className="w-full max-w-sm bg-slate-900 border border-slate-800 p-6 rounded-3xl shadow-2xl space-y-6">
-          <div className="text-center space-y-1">
-            <h1 className="text-2xl font-black text-amber-500 tracking-wider">JORCO PDA</h1>
-            <p className="text-xs text-slate-400 font-medium">Inicia sesión para comenzar el turno</p>
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4 font-sans select-none">
+        <div className="w-full max-w-sm bg-slate-900 border border-slate-800 p-6 rounded-3xl shadow-2xl">
+          <div className="text-center mb-6">
+            <span className="text-4xl block mb-2">📱</span>
+            <h1 className="text-2xl font-black text-amber-500 uppercase tracking-wider">JORCO FUSIÓN</h1>
+            <p className="text-xs text-slate-400 font-medium">Terminal PDA Camarero</p>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
-              <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Correo Electrónico</label>
+              <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Usuario / Email</label>
               <input
-                type="email"
-                required
+                type="text"
                 placeholder="camarero@jorco.com"
                 value={emailInput}
                 onChange={(e) => setEmailInput(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-amber-200 focus:outline-none focus:border-amber-500"
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm font-bold text-slate-100 focus:outline-none focus:border-amber-500"
               />
             </div>
 
             <div>
-              <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Contraseña</label>
+              <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Contraseña</label>
               <input
                 type="password"
-                required
                 placeholder="••••••••"
                 value={passInput}
                 onChange={(e) => setPassInput(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-amber-200 focus:outline-none focus:border-amber-500"
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm font-bold text-slate-100 focus:outline-none focus:border-amber-500"
               />
             </div>
 
-            {errorLogin && <p className="text-xs text-red-400 text-center font-bold">{errorLogin}</p>}
+            {errorLogin && <p className="text-xs text-rose-500 font-bold text-center">{errorLogin}</p>}
 
             <button
               type="submit"
-              className="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black py-3 rounded-xl text-xs uppercase tracking-wider shadow-lg active:scale-95 transition"
+              className="w-full py-3.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm uppercase rounded-xl shadow-lg shadow-amber-500/10 active:scale-95 transition"
             >
-              Acceder a PDA
+              Iniciar Sesión
             </button>
           </form>
         </div>
@@ -367,201 +328,285 @@ export default function PdaView() {
   }
 
   return (
-    <div className="h-screen max-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none overflow-hidden">
-      {/* BARRA SUPERIOR ELEGANTE Y TÁCTIL */}
-      <header className="bg-slate-900 border-b border-slate-800 p-2.5 flex justify-between items-center shadow-md">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none pb-20">
+      
+      {/* BARRA SUPERIOR */}
+      <header className="bg-slate-900 border-b border-slate-800 p-3 flex justify-between items-center sticky top-0 z-30">
+        <button
+          onClick={() => setModalMesaAbierto(true)}
+          className="bg-amber-500 text-slate-950 font-black px-3 py-1.5 rounded-xl text-xs uppercase flex items-center gap-1 active:scale-95 transition shadow"
+        >
+          <span>📍 {zonaActiva} - {obtenerNombreMesa(mesaNum)}</span>
+          <span className="text-[10px]">▼</span>
+        </button>
+
         <div className="flex items-center gap-2">
-          <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
-          <div>
-            <span className="font-black text-amber-500 tracking-wider text-xs block leading-none">JORCO PDA</span>
-            <span className="text-[9px] text-slate-400 font-bold">{usuario.nombre}</span>
-          </div>
-        </div>
-
-        {/* ACCIONES RÁPIDAS (FICHAJE, STOCK, TURNOS Y MESAS) */}
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={toggleFichaje}
-            className={`px-2 py-1 rounded-lg text-[10px] font-black border transition ${
-              fichado
-                ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400'
-                : 'bg-red-500/20 border-red-500 text-red-400'
-            }`}
-          >
-            {fichado ? `⏱️ ${horaFichaje}` : '⏹️ Fichar'}
-          </button>
-
           <button
             onClick={() => setModalStockAbierto(true)}
-            className="bg-slate-800 border border-slate-700 text-amber-400 px-2 py-1 rounded-lg text-[10px] font-bold"
+            title="Stock"
+            className="p-2 bg-slate-800 text-amber-400 rounded-xl text-xs border border-slate-700"
           >
-            📦 Stock
+            📦
           </button>
 
           <button
             onClick={() => setModalTurnosAbierto(true)}
-            className="bg-slate-800 border border-slate-700 text-blue-400 px-2 py-1 rounded-lg text-[10px] font-bold"
+            title="Turnos"
+            className="p-2 bg-slate-800 text-amber-400 rounded-xl text-xs border border-slate-700"
           >
-            📅 Turnos
+            📅
           </button>
 
           <button
-            onClick={() => setModalMesaAbierto(true)}
-            className="flex items-center gap-1 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black px-2.5 py-1 rounded-xl text-xs shadow-lg active:scale-95 transition"
+            onClick={toggleFichaje}
+            className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase transition border ${
+              fichado
+                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
+                : 'bg-rose-500/20 text-rose-400 border-rose-500/40'
+            }`}
           >
-            <span>📍 {zonaActiva.toUpperCase()}</span>
-            <span className="bg-slate-950/20 px-1.5 py-0.5 rounded border border-slate-950/20">
-              {obtenerNombreMesa(mesaNum)}
-            </span>
+            {fichado ? `⏰ ${horaFichaje}` : '⏹️ Fichar'}
           </button>
 
-          <button onClick={handleLogout} className="text-slate-500 hover:text-slate-300 text-xs px-1" title="Salir">
-            🚪
+          <button onClick={handleLogout} className="text-slate-500 hover:text-slate-300 font-bold text-xs p-1">
+            ✕
           </button>
         </div>
       </header>
 
-      {/* INPUT RÁPIDO PARA ALIAS DEL CLIENTE */}
-      <div className="bg-slate-900/60 border-b border-slate-800/80 px-2.5 py-1.5 flex items-center gap-2">
+      {/* INPUT ALIAS CLIENTE */}
+      <div className="bg-slate-900/50 p-2 border-b border-slate-800/80 flex items-center gap-2 px-3">
         <span className="text-xs">👤</span>
         <input
           type="text"
-          placeholder="Descripción del cliente (ej: Gorra roja, Barra alta...)"
+          placeholder="Nombre o descripción (ej: Gorra roja)"
           value={aliasActual}
           onChange={(e) => setAliasPorMesa({ ...aliasPorMesa, [claveMesaActual]: e.target.value })}
-          className="w-full bg-transparent text-xs text-amber-200 placeholder-slate-500 font-medium focus:outline-none"
+          className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1 text-xs font-bold text-amber-300 placeholder-slate-600 focus:outline-none"
         />
-        {aliasActual && (
+      </div>
+
+      {/* FAMILIAS */}
+      <div className="flex gap-1.5 p-2 overflow-x-auto bg-slate-950 border-b border-slate-900 scrollbar-none">
+        {familias.map((f) => (
           <button
-            onClick={() => setAliasPorMesa({ ...aliasPorMesa, [claveMesaActual]: '' })}
-            className="text-slate-500 text-xs px-1"
+            key={f}
+            onClick={() => setFamiliaActiva(f)}
+            className={`px-4 py-2 rounded-xl text-xs font-black uppercase whitespace-nowrap transition ${
+              familiaActiva === f
+                ? 'bg-amber-500 text-slate-950 shadow-md'
+                : 'bg-slate-900 text-slate-400 border border-slate-800'
+            }`}
           >
-            ✕
+            {f}
           </button>
-        )}
+        ))}
       </div>
 
-      {/* CARRUSEL DE FAMILIAS / CATEGORÍAS */}
-      <div className="bg-slate-900 border-b border-slate-800 p-1.5 flex gap-1.5 overflow-x-auto no-scrollbar">
-        {familias.map((f) => {
-          const esActiva = familiaActiva === f
-          return (
-            <button
-              key={f}
-              onClick={() => setFamiliaActiva(f)}
-              className={`px-4 py-2 rounded-xl text-xs font-black uppercase whitespace-nowrap transition-all shadow-sm active:scale-95 ${
-                esActiva
-                  ? 'bg-amber-500 text-slate-950 shadow-amber-500/20 shadow-md'
-                  : 'bg-slate-800/80 text-slate-300 border border-slate-700/50 hover:bg-slate-800'
-              }`}
-            >
-              {f}
-            </button>
-          )
-        })}
-      </div>
-
-      {/* MULTIPLICADOR RÁPIDO */}
-      <div className="bg-slate-900/40 px-2 py-1 flex items-center justify-between border-b border-slate-800/50">
-        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Cantidad a marcar:</span>
-        <div className="flex gap-1">
-          {[1, 2, 3, 4, 5, 10].map((num) => (
-            <button
-              key={num}
-              onClick={() => setMultiplicador(num)}
-              className={`w-7 h-6 rounded-lg font-black text-xs transition active:scale-90 ${
-                multiplicador === num
-                  ? 'bg-emerald-500 text-slate-950 shadow-sm'
-                  : 'bg-slate-800 text-slate-400 border border-slate-700/40'
-              }`}
-            >
-              {num}x
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* PARRILLA DE PRODUCTOS TÁCTILES */}
-      <main className="flex-1 p-2 overflow-y-auto grid grid-cols-2 gap-2 align-content-start pb-24">
+      {/* PRODUCTOS */}
+      <div className="p-2 grid grid-cols-2 gap-2 flex-1 overflow-y-auto">
         {productosFiltrados.map((p) => (
           <button
             key={p.id}
             onClick={() => agregarAlTicket(p)}
-            className="bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-amber-500/40 p-3 rounded-2xl flex flex-col justify-between h-24 active:scale-95 transition shadow-sm text-left group"
+            className="bg-slate-900 border border-slate-800 hover:border-amber-500/50 p-3 rounded-2xl flex flex-col justify-between h-28 active:scale-95 transition text-left"
           >
             <div className="flex justify-between items-start w-full">
-              <span className="font-bold text-xs text-slate-100 leading-snug line-clamp-2 pr-1">{p.nombre}</span>
-              <span className="text-lg group-active:scale-125 transition-transform">{p.img || '🍽️'}</span>
+              <span className="font-extrabold text-xs text-slate-200 line-clamp-2">{p.nombre}</span>
+              <span className="text-xl">{p.img || '🍽️'}</span>
             </div>
-
             <div className="flex justify-between items-end w-full border-t border-slate-800/60 pt-1.5">
-              <span className="text-[9px] font-black uppercase text-slate-500 tracking-wider">{p.destino}</span>
+              <span className="text-[9px] font-black uppercase text-slate-500">{p.destino}</span>
               <span className="font-black text-sm text-amber-400">{Number(p.precio).toFixed(2)}€</span>
             </div>
           </button>
         ))}
-      </main>
+      </div>
 
-      {/* BARRA INFERIOR FLOTANTE DE COMANDA */}
-      <footer className="fixed bottom-0 left-0 right-0 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 p-2.5 flex items-center gap-2 shadow-2xl z-30">
+      {/* BARRA FLOTANTE ENVIAR */}
+      <div className="fixed bottom-0 left-0 right-0 p-3 bg-slate-900 border-t border-slate-800 flex justify-between items-center gap-2 z-20">
         <button
-          onClick={() => setVerComandaMobile(!verComandaMobile)}
-          className="flex-1 bg-slate-800 hover:bg-slate-750 border border-slate-700 rounded-xl p-2 flex items-center justify-between active:scale-95 transition"
+          onClick={() => setVerComandaMobile(true)}
+          className="flex-1 bg-slate-950 border border-slate-800 px-4 py-2.5 rounded-2xl flex justify-between items-center"
         >
           <div className="flex items-center gap-2">
-            <span className="bg-amber-500 text-slate-950 font-black text-xs w-6 h-6 rounded-lg flex items-center justify-center">
-              {totalItems}
+            <span className="bg-amber-500 text-slate-950 font-black text-xs px-2 py-0.5 rounded-full">
+              {comandaActual.reduce((s, i) => s + i.cantidad, 0)}
             </span>
-            <div className="text-left">
-              <span className="text-[10px] font-bold text-slate-400 uppercase block leading-none">Ver Ticket</span>
-              <span className="text-xs font-black text-slate-200">
-                {comandaActual.length === 0 ? 'Vacío' : `${calcularTotal().toFixed(2)}€`}
-              </span>
-            </div>
+            <span className="text-xs font-bold text-slate-300">Ver Pedido</span>
           </div>
-          <span className="text-slate-400 text-xs">{verComandaMobile ? '▼' : '▲'}</span>
+          <span className="font-black text-amber-400 text-sm">{calcularTotal().toFixed(2)}€</span>
         </button>
 
         <button
           onClick={enviarComandaBD}
           disabled={comandaActual.length === 0}
-          className="bg-gradient-to-r from-emerald-500 to-emerald-600 disabled:opacity-30 disabled:pointer-events-none text-slate-950 font-black px-4 py-3 rounded-xl text-xs uppercase tracking-wider shadow-lg shadow-emerald-500/20 active:scale-95 transition flex items-center gap-1.5"
+          className="bg-amber-500 disabled:opacity-30 text-slate-950 font-black px-5 py-3 rounded-2xl text-xs uppercase shadow-lg active:scale-95 transition"
         >
-          <span>🚀 ENVIAR</span>
+          🚀 ENVIAR
         </button>
-      </footer>
+      </div>
 
-      {/* MODAL CONTROL STOCK Y FALTAS */}
-      {modalStockAbierto && (
-        <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md z-50 p-4 flex flex-col justify-between animate-in fade-in duration-150">
+      {/* MODAL COMANDA */}
+      {verComandaMobile && (
+        <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-sm z-50 flex flex-col p-4">
+          <div className="flex justify-between items-center pb-3 border-b border-slate-800">
+            <div>
+              <h2 className="font-black text-amber-500 text-base uppercase">
+                {zonaActiva} - {obtenerNombreMesa(mesaNum)}
+              </h2>
+              {aliasActual && <p className="text-xs text-amber-300 font-bold">👤 {aliasActual}</p>}
+            </div>
+            <button
+              onClick={() => setVerComandaMobile(false)}
+              className="w-8 h-8 bg-slate-800 text-slate-300 font-bold rounded-full"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto py-4 space-y-2">
+            {comandaActual.length === 0 ? (
+              <p className="text-center text-slate-500 text-xs py-10">No hay productos en esta mesa.</p>
+            ) : (
+              comandaActual.map((item) => (
+                <div
+                  key={item.id}
+                  className="bg-slate-900 border border-slate-800 p-3 rounded-2xl flex justify-between items-center"
+                >
+                  <div>
+                    <span className="font-bold text-xs text-slate-100 block">{item.nombre}</span>
+                    <span className="text-[10px] text-slate-400">{Number(item.precio).toFixed(2)}€ / ud</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 p-1 rounded-xl">
+                      <button
+                        onClick={() => cambiarCantidad(item.id, -1)}
+                        className="w-6 h-6 bg-rose-500/20 text-rose-400 font-black rounded-lg text-xs"
+                      >
+                        -
+                      </button>
+                      <span className="font-black text-xs px-2">{item.cantidad}</span>
+                      <button
+                        onClick={() => cambiarCantidad(item.id, 1)}
+                        className="w-6 h-6 bg-emerald-500/20 text-emerald-400 font-black rounded-lg text-xs"
+                      >
+                        +
+                      </button>
+                    </div>
+                    <span className="font-black text-sm text-amber-400 w-14 text-right">
+                      {(item.precio * item.cantidad).toFixed(2)}€
+                    </span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="pt-3 border-t border-slate-800 space-y-3">
+            <div className="flex justify-between items-center text-base font-black">
+              <span>TOTAL</span>
+              <span className="text-amber-400 text-xl">{calcularTotal().toFixed(2)}€</span>
+            </div>
+            <button
+              onClick={enviarComandaBD}
+              disabled={comandaActual.length === 0}
+              className="w-full py-4 bg-amber-500 disabled:opacity-30 text-slate-950 font-black text-sm uppercase rounded-2xl shadow-xl active:scale-95 transition"
+            >
+              🚀 ENVIAR A TPV PRINCIPAL
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL MESA */}
+      {modalMesaAbierto && (
+        <div className="fixed inset-0 bg-slate-950/90 z-50 p-4 flex flex-col justify-between">
           <div>
-            <div className="flex justify-between items-center mb-4 pb-2 border-b border-slate-800">
-              <h2 className="font-black text-amber-500 text-base uppercase tracking-wider">📦 Control de Stock / Faltas</h2>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="font-black text-amber-500 text-sm uppercase">Seleccionar Ubicación</h2>
               <button
-                onClick={() => setModalStockAbierto(false)}
-                className="w-9 h-9 rounded-xl bg-slate-800 text-slate-300 font-bold text-base flex items-center justify-center"
+                onClick={() => setModalMesaAbierto(false)}
+                className="w-8 h-8 bg-slate-800 text-slate-300 font-bold rounded-full"
               >
                 ✕
               </button>
             </div>
 
-            <p className="text-xs text-slate-400 mb-3 font-medium">Marca los productos agotados o escribe lo que falta para notificar a los jefes:</p>
+            <div className="flex gap-2 mb-4">
+              {['Terraza', 'Salón', 'Barra'].map((z) => (
+                <button
+                  key={z}
+                  onClick={() => setZonaActiva(z)}
+                  className={`flex-1 py-2 rounded-xl text-xs font-black uppercase transition ${
+                    zonaActiva === z ? 'bg-amber-500 text-slate-950' : 'bg-slate-900 text-slate-400'
+                  }`}
+                >
+                  {z}
+                </button>
+              ))}
+            </div>
 
-            <div className="grid grid-cols-2 gap-2 max-h-[35vh] overflow-y-auto mb-4 pr-1">
+            <div className="grid grid-cols-4 gap-2 max-h-[60vh] overflow-y-auto">
+              {opcionesMesas.map((n) => {
+                const esSeleccionada = mesaNum === n
+                const nombreVisual = obtenerNombreMesa(n)
+                return (
+                  <div
+                    key={n}
+                    onClick={() => {
+                      setMesaNum(n)
+                      setModalMesaAbierto(false)
+                    }}
+                    className={`p-3 rounded-2xl border text-center relative flex flex-col justify-center items-center h-20 ${
+                      esSeleccionada
+                        ? 'bg-amber-500 border-amber-400 text-slate-950 font-black'
+                        : 'bg-slate-900 border-slate-800 text-slate-300 font-bold'
+                    }`}
+                  >
+                    <span className="text-xs uppercase leading-tight line-clamp-2">{nombreVisual}</span>
+                    <button
+                      onClick={(e) => renombrarMesa(n, e)}
+                      className="absolute top-1 right-1 text-[10px] opacity-60 hover:opacity-100 p-1"
+                    >
+                      ✏️
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL STOCK */}
+      {modalStockAbierto && (
+        <div className="fixed inset-0 bg-slate-950/90 z-50 p-4 flex flex-col justify-between">
+          <div>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="font-black text-amber-500 text-sm uppercase">📦 Reportar Faltas / Stock</h2>
+              <button
+                onClick={() => setModalStockAbierto(false)}
+                className="w-8 h-8 bg-slate-800 text-slate-300 font-bold rounded-full"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 mb-4 max-h-[40vh] overflow-y-auto">
               {productos.map((p) => {
                 const marcado = listaFaltas.includes(p.nombre)
                 return (
                   <button
                     key={p.id}
                     onClick={() => toggleFaltaProducto(p.nombre)}
-                    className={`p-2 rounded-xl text-xs font-bold border flex items-center justify-between text-left transition ${
+                    className={`p-2.5 rounded-xl border text-left text-xs font-bold transition ${
                       marcado
-                        ? 'bg-red-500/20 border-red-500 text-red-300'
+                        ? 'bg-rose-500/20 border-rose-500 text-rose-300'
                         : 'bg-slate-900 border-slate-800 text-slate-300'
                     }`}
                   >
-                    <span className="truncate">{p.nombre}</span>
-                    <span>{marcado ? '❌' : '➕'}</span>
+                    {marcado ? '❌ ' : '✔️ '} {p.nombre}
                   </button>
                 )
               })}
@@ -570,257 +615,73 @@ export default function PdaView() {
             <div className="flex gap-2 mb-4">
               <input
                 type="text"
-                placeholder="Otra falta (ej: Servilletas, Limones...)"
+                placeholder="Otra falta manual"
                 value={faltaTextoManual}
                 onChange={(e) => setFaltaTextoManual(e.target.value)}
-                className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-amber-200 focus:outline-none"
+                className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100"
               />
-              <button
-                onClick={agregarFaltaManual}
-                className="bg-slate-800 border border-slate-700 font-bold px-3 py-2 rounded-xl text-xs text-amber-400"
-              >
-                Añadir
+              <button onClick={agregarFaltaManual} className="bg-slate-800 px-3 py-2 rounded-xl text-xs font-bold">
+                +
               </button>
             </div>
-
-            {listaFaltas.length > 0 && (
-              <div className="bg-slate-900/80 border border-slate-800 p-3 rounded-2xl space-y-1 max-h-[20vh] overflow-y-auto">
-                <span className="text-[10px] font-bold text-red-400 uppercase block">Lista de Faltas actual:</span>
-                {listaFaltas.map((item, idx) => (
-                  <div key={idx} className="text-xs text-slate-200 flex justify-between items-center">
-                    <span>• {item}</span>
-                    <button onClick={() => toggleFaltaProducto(item)} className="text-slate-500 text-[10px]">✕</button>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
 
           <button
             onClick={enviarAvisoJefes}
             disabled={listaFaltas.length === 0}
-            className="w-full bg-gradient-to-r from-red-500 to-red-600 disabled:opacity-30 text-white font-black py-3.5 rounded-2xl text-xs uppercase tracking-wider mt-2 shadow-lg"
+            className="w-full py-3.5 bg-rose-600 disabled:opacity-30 text-white font-black text-xs uppercase rounded-xl shadow-lg"
           >
-            📩 Avisar a Jefes de Faltas ({listaFaltas.length})
+            📩 ENVIAR AVISO A JEFES ({listaFaltas.length})
           </button>
         </div>
       )}
 
-      {/* MODAL ORGANIZADOR DE TURNOS */}
+      {/* MODAL TURNOS */}
       {modalTurnosAbierto && (
-        <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md z-50 p-4 flex flex-col justify-between animate-in fade-in duration-150">
+        <div className="fixed inset-0 bg-slate-950/90 z-50 p-4 flex flex-col justify-between">
           <div>
-            <div className="flex justify-between items-center mb-4 pb-2 border-b border-slate-800">
-              <h2 className="font-black text-amber-500 text-base uppercase tracking-wider">📅 Organización de Turnos</h2>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="font-black text-amber-500 text-sm uppercase">📅 Turnos de Trabajo</h2>
               <button
                 onClick={() => setModalTurnosAbierto(false)}
-                className="w-9 h-9 rounded-xl bg-slate-800 text-slate-300 font-bold text-base flex items-center justify-center"
+                className="w-8 h-8 bg-slate-800 text-slate-300 font-bold rounded-full"
               >
                 ✕
               </button>
             </div>
 
-            <p className="text-xs text-slate-400 mb-3 font-medium">Toca un turno para apuntarte o desapuntarte:</p>
+            <div className="space-y-3 max-h-[70vh] overflow-y-auto">
+              {Object.keys(turnos).map((t) => {
+                const apuntados = turnos[t] || []
+                const yoApuntado = apuntados.includes(usuario?.nombre)
 
-            <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
-              {Object.keys(turnos).map((turnoNombre) => {
-                const camareros = turnos[turnoNombre]
-                const estoyApuntado = camareros.includes(usuario.nombre)
                 return (
-                  <div key={turnoNombre} className="bg-slate-900 border border-slate-800 p-3 rounded-2xl flex justify-between items-center">
+                  <div key={t} className="bg-slate-900 border border-slate-800 p-3 rounded-2xl flex justify-between items-center">
                     <div>
-                      <span className="font-extrabold text-xs text-amber-400 block">{turnoNombre}</span>
-                      <span className="text-[10px] text-slate-400">
-                        {camareros.length === 0 ? 'Sin apuntar' : camareros.join(', ')}
-                      </span>
+                      <h3 className="font-black text-xs text-slate-200">{t}</h3>
+                      <p className="text-[10px] text-slate-500">
+                        {apuntados.length > 0 ? `Apuntados: ${apuntados.join(', ')}` : 'Nadie apuntado'}
+                      </p>
                     </div>
 
                     <button
-                      onClick={() => toggleApuntarseTurno(turnoNombre)}
-                      className={`px-3 py-1.5 rounded-xl font-black text-xs transition ${
-                        estoyApuntado
-                          ? 'bg-red-500/20 text-red-400 border border-red-500/40'
+                      onClick={() => toggleApuntarseTurno(t)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase transition ${
+                        yoApuntado
+                          ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40'
                           : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
                       }`}
                     >
-                      {estoyApuntado ? 'Desapuntarme' : 'Apuntarme'}
+                      {yoApuntado ? 'Desapuntarme' : 'Apuntarme'}
                     </button>
                   </div>
                 )
               })}
             </div>
           </div>
-
-          <button
-            onClick={() => setModalTurnosAbierto(false)}
-            className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold py-3.5 rounded-2xl text-xs uppercase tracking-wider mt-2"
-          >
-            Guardar y Cerrar
-          </button>
         </div>
       )}
 
-      {/* DESPLEGABLE TICKET MOBILE */}
-      {verComandaMobile && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-40 flex flex-col justify-end">
-          <div className="bg-slate-900 border-t border-slate-800 rounded-t-3xl p-4 max-h-[75vh] flex flex-col shadow-2xl animate-in slide-in-from-bottom duration-200">
-            <div className="flex justify-between items-center mb-3 pb-2 border-b border-slate-800">
-              <div>
-                <h3 className="font-black text-amber-500 text-sm uppercase">
-                  Comanda {zonaActiva} - {obtenerNombreMesa(mesaNum)}
-                </h3>
-                {aliasActual && <p className="text-xs text-amber-200">👤 {aliasActual}</p>}
-              </div>
-              <button
-                onClick={() => setVerComandaMobile(false)}
-                className="w-8 h-8 rounded-full bg-slate-800 text-slate-400 font-bold flex items-center justify-center text-sm"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto space-y-2 pr-1 mb-3">
-              {comandaActual.length === 0 ? (
-                <div className="py-8 text-center text-slate-500 text-xs italic">
-                  No has añadido ningún producto a esta mesa.
-                </div>
-              ) : (
-                comandaActual.map((item) => (
-                  <div
-                    key={item.id}
-                    className="bg-slate-950 border border-slate-800/80 p-2.5 rounded-xl flex justify-between items-center"
-                  >
-                    <div className="flex-1 pr-2">
-                      <span className="font-bold text-xs text-slate-200 block">{item.nombre}</span>
-                      <span className="text-[10px] text-amber-400 font-semibold">
-                        {Number(item.precio).toFixed(2)}€/unid
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => cambiarCantidad(item.id, -1)}
-                        className="w-7 h-7 bg-red-500/20 hover:bg-red-500/30 text-red-400 font-black rounded-lg text-sm border border-red-500/30 active:scale-90"
-                      >
-                        -
-                      </button>
-                      <span className="font-black text-sm text-slate-100 w-5 text-center">{item.cantidad}</span>
-                      <button
-                        onClick={() => cambiarCantidad(item.id, 1)}
-                        className="w-7 h-7 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 font-black rounded-lg text-sm border border-emerald-500/30 active:scale-90"
-                      >
-                        +
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-
-            <div className="border-t border-slate-800 pt-3 flex items-center justify-between">
-              <div>
-                <span className="text-[10px] font-bold text-slate-400 uppercase block">Total Comanda</span>
-                <span className="text-xl font-black text-amber-400">{calcularTotal().toFixed(2)}€</span>
-              </div>
-              <button
-                onClick={enviarComandaBD}
-                disabled={comandaActual.length === 0}
-                className="bg-emerald-500 hover:bg-emerald-400 disabled:opacity-30 text-slate-950 font-black px-6 py-3 rounded-xl text-xs uppercase shadow-lg shadow-emerald-500/20 active:scale-95 transition"
-              >
-                🚀 Confirmar y Enviar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL SELECTOR Y RENOMBRADOR DE MESAS */}
-      {modalMesaAbierto && (
-        <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md z-50 p-4 flex flex-col justify-between animate-in fade-in duration-150">
-          <div>
-            <div className="flex justify-between items-center mb-4 pb-2 border-b border-slate-800">
-              <h2 className="font-black text-amber-500 text-base uppercase tracking-wider">
-                Seleccionar / Editar Mesa
-              </h2>
-              <button
-                onClick={() => setModalMesaAbierto(false)}
-                className="w-9 h-9 rounded-xl bg-slate-800 text-slate-300 font-bold text-base flex items-center justify-center"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2 mb-4">
-              {['Terraza', 'Salón', 'Barra'].map((z) => (
-                <button
-                  key={z}
-                  onClick={() => setZonaActiva(z)}
-                  className={`py-2.5 rounded-xl font-black text-xs uppercase transition active:scale-95 ${
-                    zonaActiva === z
-                      ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
-                      : 'bg-slate-900 text-slate-400 border border-slate-800'
-                  }`}
-                >
-                  {z}
-                </button>
-              ))}
-            </div>
-
-            <div className="grid grid-cols-4 gap-2 max-h-[55vh] overflow-y-auto pr-1">
-              {Array.from({ length: 20 }, (_, i) => i + 1).map((n) => {
-                const esMesaActual = mesaNum === n
-                const clave = `${zonaActiva}-${n}`
-                const tieneComanda = comandasPorMesa[clave] && comandasPorMesa[clave].length > 0
-                const nombreVisual = obtenerNombreMesa(n)
-
-                return (
-                  <div
-                    key={n}
-                    onClick={() => {
-                      setMesaNum(n)
-                      setModalMesaAbierto(false)
-                    }}
-                    className={`p-2.5 rounded-2xl border flex flex-col justify-between h-20 relative active:scale-95 transition ${
-                      esMesaActual
-                        ? 'bg-amber-500/10 border-amber-500 text-amber-300'
-                        : tieneComanda
-                        ? 'bg-slate-900 border-emerald-500/50 text-emerald-400'
-                        : 'bg-slate-900 border-slate-800 text-slate-300'
-                    }`}
-                  >
-                    <div className="flex justify-between items-start">
-                      <span className="text-[10px] font-black opacity-60">#{n}</span>
-                      <button
-                        onClick={(e) => renombrarMesa(n, e)}
-                        title="Renombrar mesa"
-                        className="w-5 h-5 rounded-md bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-amber-400 text-[10px] flex items-center justify-center font-bold border border-slate-700"
-                      >
-                        ✏️
-                      </button>
-                    </div>
-
-                    <div>
-                      <span className="font-extrabold text-xs block truncate">{nombreVisual}</span>
-                      {tieneComanda && (
-                        <span className="text-[9px] font-bold text-emerald-400 flex items-center gap-1">
-                          ● Con Pedido
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-
-          <button
-            onClick={() => setModalMesaAbierto(false)}
-            className="w-full bg-slate-800 hover:bg-slate-750 text-slate-200 font-bold py-3.5 rounded-2xl text-xs uppercase tracking-wider mt-2"
-          >
-            Aceptar y Cerrar
-          </button>
-        </div>
-      )}
     </div>
   )
 }
