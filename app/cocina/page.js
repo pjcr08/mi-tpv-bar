@@ -27,12 +27,13 @@ export default function CocinaPage() {
         return;
       }
 
-      // 2. Obtener los IDs de pedido únicos y consultar sus mesas con ZONA y NÚMERO
+      // 2. Obtener los IDs de pedido únicos y consultar sus mesas con ZONA, NÚMERO y NOTA
       const pedidoIds = [...new Set(lineas.map((l) => l.pedido_id))];
       const { data: pedidos } = await supabase
         .from('pedidos')
         .select(`
           id,
+          nota,
           mesas (
             numero,
             zona
@@ -40,15 +41,23 @@ export default function CocinaPage() {
         `)
         .in('id', pedidoIds);
 
-      // 3. Crear el mapa de nombres para las mesas
+      // 3. Crear el mapa de nombres para las mesas (incluyendo el ALIAS / NOTA si existe)
       const mapaMesas = {};
       pedidos?.forEach((p) => {
+        let textoMesa = '';
         if (p.mesas) {
           const zona = p.mesas.zona ? p.mesas.zona.toUpperCase() : 'MESA';
-          mapaMesas[p.id] = `${zona} - Mesa ${p.mesas.numero}`;
+          textoMesa = `${zona} - Mesa ${p.mesas.numero}`;
         } else {
-          mapaMesas[p.id] = `Pedido #${p.id}`;
+          textoMesa = `Pedido #${p.id}`;
         }
+
+        // Si el pedido tiene un alias/nota, se lo añadimos
+        if (p.nota) {
+          textoMesa += ` (${p.nota})`;
+        }
+
+        mapaMesas[p.id] = textoMesa;
       });
 
       // 4. Agrupar por pedido
@@ -176,7 +185,7 @@ export default function CocinaPage() {
                 background: '#1e1e1e',
                 display: 'flex',
                 flexDirection: 'column',
-                justifyContent: 'space-between'
+                justify: 'space-between'
               }}
             >
               <div>
