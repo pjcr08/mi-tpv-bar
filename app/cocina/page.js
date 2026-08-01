@@ -52,7 +52,7 @@ export default function CocinaView() {
         return
       }
 
-      // 2. Obtener las líneas de pedido destinadas a cocina (filtro flexible)
+      // 2. Obtener las líneas de pedido destinadas a cocina
       const pedidoIds = pedidosData.map((p) => p.id)
       const { data: lineasData, error: lineasErr } = await supabase
         .from('lineas_pedido')
@@ -61,7 +61,7 @@ export default function CocinaView() {
 
       if (lineasErr) throw lineasErr
 
-      // 3. Filtrar líneas que vayan a cocina (tolerante a mayúsculas/minúsculas o sin definir)
+      // 3. Filtrar líneas que vayan a cocina (tolerante a mayúsculas/minúsculas o nulos)
       const lineasCocina = (lineasData || []).filter(
         (l) => !l.destino || l.destino.toLowerCase() === 'cocina'
       )
@@ -72,7 +72,7 @@ export default function CocinaView() {
           const lineas = lineasCocina.filter((l) => l.pedido_id === ped.id)
           return { ...ped, lineas }
         })
-        .filter((ped) => ped.lineas.length > 0) // Solo mostrar si tienen platos para cocina
+        .filter((ped) => ped.lineas.length > 0)
 
       setPedidos(pedidosConLineas)
     } catch (err) {
