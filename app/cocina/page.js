@@ -15,17 +15,23 @@ export default function PantallaCocina() {
           producto_nombre,
           cantidad,
           created_at,
-          pedidos (
+          pedidos!inner (
+            id,
             nota,
+            estado,
             mesas ( zona, numero, nombre_custom )
           )
         `)
         .eq('destino', 'cocina')
         .eq('estado', 'pendiente')
+        .eq('pedidos.estado', 'abierto')
         .order('created_at', { ascending: true })
 
-      if (error) console.error('Error cargando cocina:', error)
-      else setComandas(data || [])
+      if (error) {
+        console.error('Error cargando cocina:', error)
+      } else {
+        setComandas(data || [])
+      }
     } catch (err) {
       console.error('Excepción cargando cocina:', err)
     }
@@ -44,6 +50,13 @@ export default function PantallaCocina() {
           cargarComandasCocina()
         }
       )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'pedidos' },
+        () => {
+          cargarComandasCocina()
+        }
+      )
       .subscribe()
 
     return () => {
@@ -52,6 +65,9 @@ export default function PantallaCocina() {
   }, [])
 
   const marcarCompletado = async (id) => {
+    // Optimistic UI update
+    setComandas((prev) => prev.filter((item) => item.id !== id))
+
     const { error } = await supabase
       .from('lineas_pedido')
       .update({ estado: 'listo' })
@@ -59,8 +75,7 @@ export default function PantallaCocina() {
 
     if (error) {
       alert(`Error al actualizar estado: ${error.message}`)
-    } else {
-      setComandas((prev) => prev.filter((item) => item.id !== id))
+      cargarComandasCocina() // Revertir en caso de error
     }
   }
 
@@ -95,7 +110,6 @@ export default function PantallaCocina() {
                 className="bg-slate-900 border-2 border-orange-500/40 hover:border-orange-500 rounded-2xl p-4 flex flex-col justify-between shadow-xl cursor-pointer active:scale-95 transition group"
               >
                 <div>
-                  {/* CABECERA CON MESA Y ZONA */}
                   <div className="flex justify-between items-center pb-2 border-b border-slate-800 mb-3">
                     <span className="font-black text-orange-400 text-sm uppercase">
                       📍 {zona} - {nombreMesa}
@@ -105,14 +119,12 @@ export default function PantallaCocina() {
                     </span>
                   </div>
 
-                  {/* NOTA DEL CLIENTE SI EXISTE */}
                   {nota && (
                     <div className="bg-orange-500/10 border border-orange-500/20 text-orange-300 text-xs font-bold px-2.5 py-1 rounded-lg mb-3">
                       👤 {nota}
                     </div>
                   )}
 
-                  {/* PRODUCTO Y CANTIDAD */}
                   <div className="flex items-center gap-3 my-2">
                     <span className="bg-orange-500 text-slate-950 font-black text-lg px-3 py-1 rounded-xl">
                       {item.cantidad || 1}x
