@@ -19,7 +19,7 @@ export default function HomePrincipal() {
   const [ticketsPorMesa, setTicketsPorMesa] = useState({})
   const [notasPorMesa, setNotasPorMesa] = useState({})
 
-  // Multiplicador / Unidades (Manejado como String para evitar fallos de teclado)
+  // Multiplicador / Unidades
   const [multiplicador, setMultiplicador] = useState('1')
 
   const claveMesaActual = `${zonaActiva}-${mesaNum}`
@@ -103,6 +103,7 @@ export default function HomePrincipal() {
           const clave = `${ped.mesas.zona}-${ped.mesas.numero}`
           nuevasNotas[clave] = ped.nota || ''
 
+          // Trae todas las líneas activas asociadas al pedido
           const lineasValidas = (ped.lineas_pedido || []).filter(
             (l) => l.estado !== 'cancelado' && l.estado !== 'cobrado'
           )
@@ -118,14 +119,14 @@ export default function HomePrincipal() {
         }
       })
 
-      setTicketsPorMesa(nuevosTickets)
-      setNotasPorMesa(nuevasNotas)
+      setTicketsPorMesa((prev) => ({ ...prev, ...nuevosTickets }))
+      setNotasPorMesa((prev) => ({ ...prev, ...nuevasNotas }))
     } catch (err) {
       console.error('Error inesperado cargando comandas activas:', err)
     }
   }
 
-  // EFFECT INICIAL + ESCUCHA EN TIEMPO REAL
+  // EFFECT INICIAL + REALTIME
   useEffect(() => {
     cargarProductos()
     cargarNombresMesas()
@@ -169,6 +170,8 @@ export default function HomePrincipal() {
         .select('id')
         .eq('zona', zonaActiva)
         .eq('numero', mesaNum)
+        .order('id', { ascending: false })
+        .limit(1)
         .maybeSingle()
 
       if (errBusqueda) {
@@ -189,15 +192,28 @@ export default function HomePrincipal() {
   const agregarAlTicket = (prod) => {
     const cantAgregar = Math.max(1, Number(multiplicador) || 1)
     const ticketExistente = ticketsPorMesa[claveMesaActual] || []
-    const existe = ticketExistente.find((item) => item.nombre === prod.nombre)
+    
+    // Busca si ya existe una línea local temporal no enviada para el mismo producto
+    const existeIndice = ticketExistente.findIndex(
+      (item) => item.nombre === prod.nombre && String(item.id).startsWith('temp-')
+    )
 
-    let nuevoTicket = []
-    if (existe) {
-      nuevoTicket = ticketExistente.map((item) =>
-        item.nombre === prod.nombre ? { ...item, cantidad: item.cantidad + cantAgregar } : item
-      )
+    let nuevoTicket = [...ticketExistente]
+
+    if (existeIndice !== -1) {
+      nuevoTicket[existeIndice] = {
+        ...nuevoTicket[existeIndice],
+        cantidad: nuevoTicket[existeIndice].cantidad + cantAgregar,
+      }
     } else {
-      nuevoTicket = [...ticketExistente, { ...prod, id: `temp-${Date.now()}`, cantidad: cantAgregar }]
+      nuevoTicket.push({
+        id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        nombre: prod.nombre,
+        precio: Number(prod.precio),
+        cantidad: cantAgregar,
+        destino: prod.destino || 'barra',
+        estado: 'borrador',
+      })
     }
 
     setTicketsPorMesa((prev) => ({ ...prev, [claveMesaActual]: nuevoTicket }))
@@ -207,8 +223,14 @@ export default function HomePrincipal() {
   const cambiarCantidadItem = (id, delta) => {
     const ticketExistente = ticketsPorMesa[claveMesaActual] || []
     const nuevoTicket = ticketExistente
-      .map((item) => (item.id === id ? { ...item, cantidad: item.cantidad + delta } : item))
-      .filter((item) => item.cantidad > 0)
+      .map((item) => {
+        if (item.id === id) {
+          const nuevaCant = item.cantidad + delta
+          return nuevaCant > 0 ? { ...item, cantidad: nuevaCant } : null
+        }
+        return item
+      })
+      .filter(Boolean)
 
     setTicketsPorMesa((prev) => ({ ...prev, [claveMesaActual]: nuevoTicket }))
   }
@@ -232,6 +254,8 @@ export default function HomePrincipal() {
         .select('id')
         .eq('numero', mesaNum)
         .eq('zona', zonaActiva)
+        .order('id', { ascending: false })
+        .limit(1)
         .maybeSingle()
 
       if (errorBusqueda) {
@@ -272,12 +296,14 @@ export default function HomePrincipal() {
       const mesaId = await obtenerOCrearMesa()
       if (!mesaId) return
 
-      // 1. Verificar si hay un pedido abierto
+      // 1. Obtener el pedido abierto existente ordenado por fecha
       const { data: pedidoExistente, error: errPedidoExistente } = await supabase
         .from('pedidos')
         .select('id')
         .eq('mesa_id', mesaId)
         .eq('estado', 'abierto')
+        .order('created_at', { ascending: false })
+        .limit(1)
         .maybeSingle()
 
       if (errPedidoExistente) {
@@ -312,32 +338,26 @@ export default function HomePrincipal() {
         }
       }
 
-      // 3. Reemplazar o insertar líneas de pedido
+      // 3. Procesar líneas: Insertar solo los elementos temporales/nuevos
       if (pId) {
-        const { error: errDelete } = await supabase
-          .from('lineas_pedido')
-          .delete()
-          .eq('pedido_id', pId)
+        const lineasNuevas = ticketActual
+          .filter((item) => String(item.id).startsWith('temp-') || item.estado === 'borrador')
+          .map((item) => ({
+            pedido_id: pId,
+            producto_nombre: item.nombre,
+            precio: item.precio,
+            cantidad: item.cantidad,
+            destino: item.destino || 'barra',
+            estado: 'pendiente',
+          }))
 
-        if (errDelete) {
-          alert(`Error al actualizar líneas del pedido: ${errDelete.message}`)
-          return
-        }
+        if (lineasNuevas.length > 0) {
+          const { error: errInsert } = await supabase.from('lineas_pedido').insert(lineasNuevas)
 
-        const lineas = ticketActual.map((item) => ({
-          pedido_id: pId,
-          producto_nombre: item.nombre,
-          precio: item.precio,
-          cantidad: item.cantidad,
-          destino: item.destino || 'barra',
-          estado: 'pendiente',
-        }))
-
-        const { error: errInsert } = await supabase.from('lineas_pedido').insert(lineas)
-
-        if (errInsert) {
-          alert(`Error al guardar las líneas del pedido: ${errInsert.message}`)
-          return
+          if (errInsert) {
+            alert(`Error al guardar las nuevas líneas: ${errInsert.message}`)
+            return
+          }
         }
       }
 
