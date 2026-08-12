@@ -74,7 +74,7 @@ export default function HomePrincipal() {
     }
   }
 
-  // CARGA COMANDAS ACTIVAS DESDE LA BD (CORREGIDO)
+  // CARGA COMANDAS ACTIVAS DESDE LA BD
   const cargarComandasServidor = async () => {
     try {
       const { data: pedidosBD, error } = await supabase
@@ -103,7 +103,7 @@ export default function HomePrincipal() {
           const clave = `${ped.mesas.zona}-${ped.mesas.numero}`
           nuevasNotas[clave] = ped.nota || ''
 
-          // Se incluyen todas las líneas activas (pendiente, listo, marchado, borrador)
+          // Incluye todas las líneas activas (pendiente, listo, marchado, borrador)
           const lineasValidas = (ped.lineas_pedido || []).filter(
             (l) => l.estado !== 'cancelado' && l.estado !== 'cobrado'
           )
@@ -248,6 +248,7 @@ export default function HomePrincipal() {
 
   const obtenerOCrearMesa = async () => {
     try {
+      console.log('1. Buscando mesa en BD...', { zonaActiva, mesaNum })
       const { data: mesaBD, error: errorBusqueda } = await supabase
         .from('mesas')
         .select('id')
@@ -259,12 +260,16 @@ export default function HomePrincipal() {
 
       if (errorBusqueda) {
         console.error('Error buscando mesa:', errorBusqueda)
-        alert(`Error en BD al buscar la mesa: ${errorBusqueda.message}`)
+        alert(`Error al buscar mesa: ${errorBusqueda.message}`)
         return null
       }
 
-      if (mesaBD) return mesaBD.id
+      if (mesaBD?.id) {
+        console.log('Mesa encontrada:', mesaBD.id)
+        return mesaBD.id
+      }
 
+      console.log('Mesa no encontrada, creando nueva mesa...')
       const { data: nuevaMesa, error: errorCreacion } = await supabase
         .from('mesas')
         .insert([{ numero: mesaNum, zona: zonaActiva }])
@@ -273,19 +278,19 @@ export default function HomePrincipal() {
 
       if (errorCreacion) {
         console.error('Error creando mesa:', errorCreacion)
-        alert(`Error en BD al registrar la mesa: ${errorCreacion.message}`)
+        alert(`Error al crear la mesa en BD: ${errorCreacion.message}`)
         return null
       }
 
+      console.log('Nueva mesa creada:', nuevaMesa.id)
       return nuevaMesa ? nuevaMesa.id : null
     } catch (err) {
       console.error('Excepción en obtenerOCrearMesa:', err)
-      alert(`Error inesperado al gestionar la mesa: ${err.message}`)
+      alert(`Excepción en mesa: ${err.message}`)
       return null
     }
   }
 
-  // ENVIAR COMANDA (CORREGIDO)
   const enviarComanda = async () => {
     if (ticketActual.length === 0) {
       alert('El ticket está vacío.')
@@ -293,10 +298,17 @@ export default function HomePrincipal() {
     }
 
     try {
-      const mesaId = await obtenerOCrearMesa()
-      if (!mesaId) return
+      console.log('Iniciando envío de comanda...', ticketActual)
 
-      // 1. Buscar pedido abierto existente
+      // 1. Obtener o crear ID de la Mesa
+      const mesaId = await obtenerOCrearMesa()
+      if (!mesaId) {
+        alert('❌ No se pudo obtener/crear la mesa en la base de datos.')
+        return
+      }
+
+      // 2. Buscar o crear el pedido abierto
+      let pId = null
       const { data: pedidoExistente, error: errPedidoExistente } = await supabase
         .from('pedidos')
         .select('id')
@@ -307,14 +319,16 @@ export default function HomePrincipal() {
         .maybeSingle()
 
       if (errPedidoExistente) {
-        alert(`Error al verificar pedido existente: ${errPedidoExistente.message}`)
+        alert(`Error buscando pedido abierto: ${errPedidoExistente.message}`)
         return
       }
 
-      let pId = pedidoExistente?.id
-
-      // 2. Crear pedido si no existe
-      if (!pId) {
+      if (pedidoExistente?.id) {
+        pId = pedidoExistente.id
+        console.log('Pedido abierto existente encontrado:', pId)
+        await supabase.from('pedidos').update({ nota: notaActual }).eq('id', pId)
+      } else {
+        console.log('Creando nuevo pedido abierto...')
         const { data: nuevoPedido, error: errNuevoPedido } = await supabase
           .from('pedidos')
           .insert([{ mesa_id: mesaId, estado: 'abierto', nota: notaActual }])
@@ -322,43 +336,57 @@ export default function HomePrincipal() {
           .single()
 
         if (errNuevoPedido) {
-          alert(`Error al crear pedido en BD: ${errNuevoPedido.message}`)
+          alert(`Error al crear el pedido: ${errNuevoPedido.message}`)
           return
         }
-        if (nuevoPedido) pId = nuevoPedido.id
-      } else {
-        await supabase.from('pedidos').update({ nota: notaActual }).eq('id', pId)
+        pId = nuevoPedido?.id
       }
 
-      // 3. Insertar solo los elementos en borrador / temporales
-      if (pId) {
-        const lineasNuevas = ticketActual
-          .filter((item) => String(item.id).startsWith('temp-') || item.estado === 'borrador')
-          .map((item) => ({
-            pedido_id: pId,
-            producto_nombre: item.nombre,
-            precio: item.precio,
-            cantidad: item.cantidad,
-            destino: item.destino || 'barra',
-            estado: 'pendiente',
-          }))
+      if (!pId) {
+        alert('❌ No se pudo asociar un ID de pedido.')
+        return
+      }
 
-        if (lineasNuevas.length > 0) {
-          const { error: errInsert } = await supabase.from('lineas_pedido').insert(lineasNuevas)
+      // 3. Filtrar todas las líneas temporales o borradores
+      const lineasNuevas = ticketActual
+        .filter((item) => {
+          const esTemp = String(item.id).startsWith('temp-')
+          const esBorrador = item.estado === 'borrador' || !item.estado
+          return esTemp || esBorrador
+        })
+        .map((item) => ({
+          pedido_id: pId,
+          producto_nombre: item.nombre,
+          precio: item.precio,
+          cantidad: item.cantidad,
+          destino: item.destino || 'barra',
+          estado: 'pendiente',
+        }))
 
-          if (errInsert) {
-            alert(`Error al guardar las nuevas líneas: ${errInsert.message}`)
-            return
-          }
-        }
+      console.log('Líneas nuevas a insertar:', lineasNuevas)
+
+      if (lineasNuevas.length === 0) {
+        alert('⚠️ No hay productos nuevos pendientes de enviar a cocina/barra.')
+        return
+      }
+
+      // 4. Insertar las nuevas líneas en Supabase
+      const { error: errInsert } = await supabase.from('lineas_pedido').insert(lineasNuevas)
+
+      if (errInsert) {
+        console.error('Error al insertar líneas:', errInsert)
+        alert(`❌ Error al guardar las líneas del pedido: ${errInsert.message}`)
+        return
       }
 
       setMultiplicador('1')
-      alert(`🚀 Comanda enviada: ${zonaActiva} - ${nombreMesaActual}`)
+      alert(`🚀 Comanda enviada con éxito: ${zonaActiva} - ${nombreMesaActual}`)
+
+      // Recargar comanda actualizada desde el servidor
       await cargarComandasServidor()
     } catch (err) {
-      console.error('Error al enviar comanda:', err)
-      alert(`❌ Error al enviar comanda: ${err.message || 'Error desconocido'}`)
+      console.error('Error general en enviarComanda:', err)
+      alert(`❌ Error inesperado: ${err.message || err}`)
     }
   }
 
