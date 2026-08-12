@@ -1,11 +1,13 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 
 export default function PantallaBarra() {
   const [comandas, setComandas] = useState([])
+  const [cargando, setCargando] = useState(true)
 
+  // Cargar comandas pendientes cuyo destino sea 'barra'
   const cargarComandasBarra = async () => {
     try {
       const { data, error } = await supabase
@@ -14,27 +16,61 @@ export default function PantallaBarra() {
           id,
           producto_nombre,
           cantidad,
+          destino,
+          estado,
           created_at,
+          pedido_id,
           pedidos (
+            id,
             nota,
-            mesas ( zona, numero, nombre_custom )
+            estado,
+            mesas (
+              numero,
+              zona
+            )
           )
         `)
         .eq('destino', 'barra')
         .eq('estado', 'pendiente')
-        .order('created_at', { ascending: true })
+        .order('created_at', { ascending: true }) // Usa 'created_at' con guion bajo
 
-      if (error) console.error('Error cargando barra:', error)
-      else setComandas(data || [])
+      if (error) {
+        console.error('Error cargando barra:', error.message)
+        return
+      }
+
+      setComandas(data || [])
     } catch (err) {
-      console.error('Excepción cargando barra:', err)
+      console.error('Excepción en barra:', err)
+    } finally {
+      setCargando(false)
+    }
+  }
+
+  // Marcar una línea de comanda como 'listo'
+  const marcarComoListo = async (idLinea) => {
+    try {
+      const { error } = await supabase
+        .from('lineas_pedido')
+        .update({ estado: 'listo' })
+        .eq('id', idLinea)
+
+      if (error) {
+        alert(`Error al actualizar estado: ${error.message}`)
+        return
+      }
+
+      // Actualizar vista local
+      setComandas((prev) => prev.filter((item) => item.id !== idLinea))
+    } catch (e) {
+      console.error('Error al completar pedido:', e)
     }
   }
 
   useEffect(() => {
     cargarComandasBarra()
 
-    // Suscripción Realtime a cambios en líneas de pedido
+    // Suscripción en tiempo real a la tabla lineas_pedido
     const channel = supabase
       .channel('realtime-barra')
       .on(
@@ -51,81 +87,79 @@ export default function PantallaBarra() {
     }
   }, [])
 
-  const marcarCompletado = async (id) => {
-    const { error } = await supabase
-      .from('lineas_pedido')
-      .update({ estado: 'listo' })
-      .eq('id', id)
-
-    if (error) {
-      alert(`Error al actualizar estado: ${error.message}`)
-    } else {
-      setComandas((prev) => prev.filter((item) => item.id !== id))
-    }
-  }
-
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 p-6 font-sans">
-      <header className="flex justify-between items-center pb-6 border-b border-slate-800 mb-6">
-        <h1 className="text-2xl font-black text-amber-500 flex items-center gap-2 uppercase tracking-wider">
-          <span>🍹</span> Pantalla de Barra
-        </h1>
-        <span className="bg-slate-900 border border-slate-800 text-slate-400 font-bold px-4 py-2 rounded-xl text-xs">
-          Pendientes: <strong className="text-amber-400 text-base">{comandas.length}</strong>
-        </span>
+    <div className="min-h-screen bg-slate-950 text-slate-100 p-4 font-sans select-none">
+      {/* CABECERA */}
+      <header className="bg-slate-900 border border-slate-800 rounded-2xl p-4 mb-6 flex justify-between items-center shadow-lg">
+        <div className="flex items-center gap-3">
+          <span className="text-3xl">🍹</span>
+          <h1 className="text-2xl font-black text-amber-500 uppercase tracking-wider">
+            PANTALLA DE BARRA
+          </h1>
+        </div>
+        <div className="bg-amber-500/10 border border-amber-500/30 px-4 py-1.5 rounded-xl text-amber-400 font-extrabold text-sm">
+          Pendientes: {comandas.length}
+        </div>
       </header>
 
-      {comandas.length === 0 ? (
-        <div className="flex flex-col items-center justify-center mt-20 text-slate-600">
-          <span className="text-5xl mb-2">✨</span>
+      {/* CONTENIDO PRINCIPAL */}
+      {cargando ? (
+        <div className="text-center text-slate-500 my-20 font-bold">
+          Cargando comandas de barra...
+        </div>
+      ) : comandas.length === 0 ? (
+        <div className="flex flex-col items-center justify-center my-28 text-slate-600">
+          <span className="text-5xl mb-3">✨</span>
           <p className="text-lg font-bold">Sin bebidas ni cafés pendientes</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {comandas.map((item) => {
-            const mesaInfo = item.pedidos?.mesas
-            const nombreMesa = mesaInfo?.nombre_custom || `Mesa ${mesaInfo?.numero || '?'}`
-            const zona = mesaInfo?.zona || 'Barra'
+            const mesa = item.pedidos?.mesas
             const nota = item.pedidos?.nota
 
             return (
               <div
                 key={item.id}
-                onClick={() => marcarCompletado(item.id)}
-                className="bg-slate-900 border-2 border-amber-500/40 hover:border-amber-500 rounded-2xl p-4 flex flex-col justify-between shadow-xl cursor-pointer active:scale-95 transition group"
+                className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between shadow-xl hover:border-amber-500/50 transition-all"
               >
                 <div>
-                  {/* CABECERA CON MESA Y ZONA */}
-                  <div className="flex justify-between items-center pb-2 border-b border-slate-800 mb-3">
-                    <span className="font-black text-amber-400 text-sm uppercase">
-                      📍 {zona} - {nombreMesa}
+                  {/* CABECERA TARJETA */}
+                  <div className="flex justify-between items-start pb-2 border-b border-slate-800 mb-3">
+                    <span className="bg-amber-500 text-slate-950 font-black text-xs px-2.5 py-1 rounded-lg uppercase">
+                      {mesa ? `${mesa.zona} - Mesa ${mesa.numero}` : 'Mesa S/N'}
                     </span>
-                    <span className="text-[10px] bg-slate-950 text-slate-400 font-bold px-2 py-1 rounded-md border border-slate-800">
-                      {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    <span className="text-[10px] text-slate-500 font-mono">
+                      {item.created_at ? new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                     </span>
                   </div>
-
-                  {/* NOTA DEL CLIENTE SI EXISTE */}
-                  {nota && (
-                    <div className="bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs font-bold px-2.5 py-1 rounded-lg mb-3">
-                      👤 {nota}
-                    </div>
-                  )}
 
                   {/* PRODUCTO Y CANTIDAD */}
                   <div className="flex items-center gap-3 my-2">
-                    <span className="bg-amber-500 text-slate-950 font-black text-lg px-3 py-1 rounded-xl">
-                      {item.cantidad || 1}x
+                    <span className="text-2xl font-black text-amber-400 bg-amber-500/10 px-3 py-1 rounded-xl border border-amber-500/20">
+                      {item.cantidad}x
                     </span>
-                    <h2 className="font-black text-base text-slate-100 uppercase group-hover:text-amber-400 transition">
+                    <span className="text-lg font-extrabold text-slate-100 leading-tight">
                       {item.producto_nombre}
-                    </h2>
+                    </span>
                   </div>
+
+                  {/* NOTA O ALIAS DEL CLIENTE */}
+                  {nota && (
+                    <div className="mt-2 bg-slate-950 p-2 rounded-lg border border-slate-800 text-xs text-amber-300 font-semibold">
+                      👤 {nota}
+                    </div>
+                  )}
                 </div>
 
-                <div className="mt-4 pt-2 border-t border-slate-800/80 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest group-hover:text-emerald-400 transition">
-                  Toca para servir ➔
-                </div>
+                {/* BOTÓN DESPACHAR / LISTO */}
+                <button
+                  onClick={() => marcarComoListo(item.id)}
+                  className="mt-4 w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase rounded-xl transition active:scale-95 shadow-lg shadow-emerald-600/10 flex items-center justify-center gap-2"
+                >
+                  <span>✓</span>
+                  <span>Marcar como Listo</span>
+                </button>
               </div>
             )
           })}
