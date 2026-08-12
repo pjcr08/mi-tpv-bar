@@ -1,24 +1,49 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 
-export default function CocinaView() {
-  const [pedidos, setPedidos] = useState([])
-  const [cargando, setCargando] = useState(true)
+export default function PantallaCocina() {
+  const [comandas, setComandas] = useState([])
+
+  const cargarComandasCocina = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('lineas_pedido')
+        .select(`
+          id,
+          producto_nombre,
+          cantidad,
+          created_at,
+          pedidos (
+            nota,
+            mesas ( zona, numero, nombre_custom )
+          )
+        `)
+        .eq('destino', 'cocina')
+        .eq('estado', 'pendiente')
+        .order('created_at', { ascending: true })
+
+      if (error) console.error('Error cargando cocina:', error)
+      else setComandas(data || [])
+    } catch (err) {
+      console.error('Excepción cargando cocina:', err)
+    }
+  }
 
   useEffect(() => {
-    cargarPedidosCocina()
+    cargarComandasCocina()
 
-    // Suscripción en tiempo real a la cocina
+    // Suscripción Realtime a cambios en líneas de pedido
     const channel = supabase
-      .channel('cocina-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, () => {
-        cargarPedidosCocina()
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'lineas_pedido' }, () => {
-        cargarPedidosCocina()
-      })
+      .channel('realtime-cocina')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'lineas_pedido' },
+        () => {
+          cargarComandasCocina()
+        }
+      )
       .subscribe()
 
     return () => {
@@ -26,183 +51,81 @@ export default function CocinaView() {
     }
   }, [])
 
-  const cargarPedidosCocina = async () => {
-    try {
-      // 1. Obtener pedidos abiertos (consultando columnas existentes en mesas)
-      const { data: pedidosData, error: pedidosErr } = await supabase
-        .from('pedidos')
-        .select(`
-          id,
-          nota,
-          created_at,
-          mesas (
-            zona,
-            numero
-          )
-        `)
-        .eq('estado', 'abierto')
+  const marcarCompletado = async (id) => {
+    const { error } = await supabase
+      .from('lineas_pedido')
+      .update({ estado: 'listo' })
+      .eq('id', id)
 
-      if (pedidosErr) throw pedidosErr
-
-      if (!pedidosData || pedidosData.length === 0) {
-        setPedidos([])
-        setCargando(false)
-        return
-      }
-
-      // 2. Obtener las líneas de pedido
-      const pedidoIds = pedidosData.map((p) => p.id)
-      const { data: lineasData, error: lineasErr } = await supabase
-        .from('lineas_pedido')
-        .select('*')
-        .in('pedido_id', pedidoIds)
-
-      if (lineasErr) throw lineasErr
-
-      // 3. Filtrar líneas que vayan a cocina
-      const lineasCocina = (lineasData || []).filter(
-        (l) => !l.destino || l.destino.toLowerCase() === 'cocina'
-      )
-
-      // 4. Agrupar líneas con sus pedidos
-      const pedidosConLineas = pedidosData
-        .map((ped) => {
-          const lineas = lineasCocina.filter((l) => l.pedido_id === ped.id)
-          return { ...ped, lineas }
-        })
-        .filter((ped) => ped.lineas.length > 0)
-
-      setPedidos(pedidosConLineas)
-    } catch (err) {
-      console.error('Error cargando cocina:', err)
-    } finally {
-      setCargando(false)
+    if (error) {
+      alert(`Error al actualizar estado: ${error.message}`)
+    } else {
+      setComandas((prev) => prev.filter((item) => item.id !== id))
     }
   }
 
-  // Marcar una línea individual como lista
-  const toggleLineaEstado = async (lineaId, estadoActual) => {
-    const nuevoEstado = estadoActual === 'listo' ? 'pendiente' : 'listo'
-    setPedidos((prev) =>
-      prev.map((p) => ({
-        ...p,
-        lineas: p.lineas.map((l) => (l.id === lineaId ? { ...l, estado: nuevoEstado } : l)),
-      }))
-    )
-
-    await supabase.from('lineas_pedido').update({ estado: nuevoEstado }).eq('id', lineaId)
-  }
-
-  // Marcar toda la comanda como lista
-  const completarPedido = async (pedidoId) => {
-    setPedidos((prev) => prev.filter((p) => p.id !== pedidoId))
-    await supabase
-      .from('lineas_pedido')
-      .update({ estado: 'listo' })
-      .eq('pedido_id', pedidoId)
-  }
-
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 p-4 font-sans select-none">
-      <header className="flex justify-between items-center mb-6 pb-3 border-b border-slate-800">
-        <div className="flex items-center gap-3">
-          <span className="text-3xl">👨‍🍳</span>
-          <div>
-            <h1 className="text-xl font-black text-amber-500 tracking-wider">COMANDAS DE COCINA</h1>
-            <p className="text-xs text-slate-400 font-medium">Pedidos entrantes en tiempo real</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl">
-          <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
-          <span className="text-xs font-bold text-slate-300">{pedidos.length} Activas</span>
-        </div>
+    <div className="min-h-screen bg-slate-950 text-slate-100 p-6 font-sans">
+      <header className="flex justify-between items-center pb-6 border-b border-slate-800 mb-6">
+        <h1 className="text-2xl font-black text-orange-500 flex items-center gap-2 uppercase tracking-wider">
+          <span>🍳</span> Pantalla de Cocina (KDS)
+        </h1>
+        <span className="bg-slate-900 border border-slate-800 text-slate-400 font-bold px-4 py-2 rounded-xl text-xs">
+          Pendientes: <strong className="text-orange-400 text-base">{comandas.length}</strong>
+        </span>
       </header>
 
-      {cargando ? (
-        <div className="text-center py-20 text-slate-500 text-sm">Cargando comandas...</div>
-      ) : pedidos.length === 0 ? (
-        <div className="text-center py-20 text-slate-500 font-bold text-sm">
-          🎉 ¡Todo al día! No hay marchas pendientes en cocina.
+      {comandas.length === 0 ? (
+        <div className="flex flex-col items-center justify-center mt-20 text-slate-600">
+          <span className="text-5xl mb-2">👨‍🍳</span>
+          <p className="text-lg font-bold">Sin platos ni gofres pendientes</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {pedidos.map((ped) => {
-            const nombreMesa = `Mesa ${ped.mesas?.numero || ''}`
-            const zona = ped.mesas?.zona || 'Sala'
-            const hora = ped.created_at
-              ? new Date(ped.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-              : '--:--'
-            const todoListo = ped.lineas.every((l) => l.estado === 'listo')
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {comandas.map((item) => {
+            const mesaInfo = item.pedidos?.mesas
+            const nombreMesa = mesaInfo?.nombre_custom || `Mesa ${mesaInfo?.numero || '?'}`
+            const zona = mesaInfo?.zona || 'Comedor'
+            const nota = item.pedidos?.nota
 
             return (
               <div
-                key={ped.id}
-                className={`bg-slate-900 border-2 rounded-2xl p-4 flex flex-col justify-between shadow-xl transition-all ${
-                  todoListo ? 'border-emerald-500/50 bg-slate-900/60' : 'border-amber-500/80'
-                }`}
+                key={item.id}
+                onClick={() => marcarCompletado(item.id)}
+                className="bg-slate-900 border-2 border-orange-500/40 hover:border-orange-500 rounded-2xl p-4 flex flex-col justify-between shadow-xl cursor-pointer active:scale-95 transition group"
               >
                 <div>
-                  {/* CABECERA CON ZONA Y MESA */}
-                  <div className="flex justify-between items-start mb-3 pb-2 border-b border-slate-800">
-                    <div>
-                      <span className="font-black text-amber-500 text-base uppercase block tracking-wide">
-                        {zona.toUpperCase()} - {nombreMesa}
-                      </span>
-                      {ped.nota && (
-                        <span className="inline-block mt-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-md text-xs font-black">
-                          👤 {ped.nota}
-                        </span>
-                      )}
-                    </div>
-                    <span className="text-[11px] font-bold text-slate-400 bg-slate-800 px-2 py-1 rounded-lg">
-                      ⏱️ {hora}
+                  {/* CABECERA CON MESA Y ZONA */}
+                  <div className="flex justify-between items-center pb-2 border-b border-slate-800 mb-3">
+                    <span className="font-black text-orange-400 text-sm uppercase">
+                      📍 {zona} - {nombreMesa}
+                    </span>
+                    <span className="text-[10px] bg-slate-950 text-slate-400 font-bold px-2 py-1 rounded-md border border-slate-800">
+                      {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </span>
                   </div>
 
-                  {/* LISTA DE PLATOS */}
-                  <div className="space-y-2 mb-4">
-                    {ped.lineas.map((linea) => {
-                      const esListo = linea.estado === 'listo'
-                      return (
-                        <button
-                          key={linea.id}
-                          onClick={() => toggleLineaEstado(linea.id, linea.estado)}
-                          className={`w-full p-2.5 rounded-xl border flex items-center justify-between text-left transition active:scale-95 ${
-                            esListo
-                              ? 'bg-slate-950/40 border-slate-800 text-slate-500 line-through'
-                              : 'bg-slate-950 border-slate-800 text-slate-100 font-bold hover:border-amber-500/40'
-                          }`}
-                        >
-                          <span className="text-xs">
-                            <strong className="text-amber-400 mr-1.5">{linea.cantidad}x</strong>
-                            {linea.producto_nombre}
-                          </span>
-                          <span
-                            className={`w-6 h-6 rounded-lg text-xs font-black flex items-center justify-center border ${
-                              esListo
-                                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
-                                : 'bg-slate-800 text-slate-400 border-slate-700'
-                            }`}
-                          >
-                            {esListo ? '✓' : ''}
-                          </span>
-                        </button>
-                      )
-                    })}
+                  {/* NOTA DEL CLIENTE SI EXISTE */}
+                  {nota && (
+                    <div className="bg-orange-500/10 border border-orange-500/20 text-orange-300 text-xs font-bold px-2.5 py-1 rounded-lg mb-3">
+                      👤 {nota}
+                    </div>
+                  )}
+
+                  {/* PRODUCTO Y CANTIDAD */}
+                  <div className="flex items-center gap-3 my-2">
+                    <span className="bg-orange-500 text-slate-950 font-black text-lg px-3 py-1 rounded-xl">
+                      {item.cantidad || 1}x
+                    </span>
+                    <h2 className="font-black text-base text-slate-100 uppercase group-hover:text-orange-400 transition">
+                      {item.producto_nombre}
+                    </h2>
                   </div>
                 </div>
 
-                {/* BOTÓN COMPLETAR TODO */}
-                <button
-                  onClick={() => completarPedido(ped.id)}
-                  className={`w-full py-3 rounded-xl font-black text-xs uppercase tracking-wider transition active:scale-95 flex items-center justify-center gap-2 ${
-                    todoListo
-                      ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-lg shadow-emerald-500/20'
-                      : 'bg-slate-800 hover:bg-slate-750 text-slate-300 border border-slate-700'
-                  }`}
-                >
-                  <span>✓ LISTA COMPLETA</span>
-                </button>
+                <div className="mt-4 pt-2 border-t border-slate-800/80 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest group-hover:text-emerald-400 transition">
+                  Toca para marchar plato ➔
+                </div>
               </div>
             )
           })}
