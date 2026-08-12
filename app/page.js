@@ -8,12 +8,18 @@ export default function HomePrincipal() {
   const [familiaActiva, setFamiliaActiva] = useState('')
   const [productos, setProductos] = useState([])
 
+  // ZONA Y MESAS
   const [zonaActiva, setZonaActiva] = useState('Terraza')
   const [mesaNum, setMesaNum] = useState(1)
+
+  // NOMBRES PERSONALIZADOS PARA MESAS
   const [nombresMesas, setNombresMesas] = useState({})
 
+  // ESTADO DE TICKETS Y NOTAS PERSISTENTES POR MESA
   const [ticketsPorMesa, setTicketsPorMesa] = useState({})
   const [notasPorMesa, setNotasPorMesa] = useState({})
+
+  // Multiplicador / Unidades (Manejado como String para evitar fallos de teclado)
   const [multiplicador, setMultiplicador] = useState('1')
 
   const claveMesaActual = `${zonaActiva}-${mesaNum}`
@@ -27,11 +33,16 @@ export default function HomePrincipal() {
 
   const nombreMesaActual = obtenerNombreMesa(mesaNum)
 
-  // Cargar productos
+  // CARGA DE PRODUCTOS
   const cargarProductos = async () => {
     try {
       const { data, error } = await supabase.from('productos').select('*')
-      if (error || !data) return
+      if (error) {
+        console.error('Error al cargar productos:', error)
+        return
+      }
+      if (!data) return
+
       setProductos(data)
       const fams = [...new Set(data.map((p) => p.familia))].filter(Boolean)
       if (fams.length > 0) {
@@ -39,14 +50,18 @@ export default function HomePrincipal() {
         setFamiliaActiva(fams[0])
       }
     } catch (err) {
-      console.error('Error al cargar productos:', err)
+      console.error('Error inesperado al cargar productos:', err)
     }
   }
 
-  // Cargar nombres personalizados
+  // CARGA DE NOMBRES PERSONALIZADOS
   const cargarNombresMesas = async () => {
     try {
-      const { data } = await supabase.from('mesas').select('zona, numero, nombre_custom')
+      const { data, error } = await supabase.from('mesas').select('zona, numero, nombre_custom')
+      if (error) {
+        console.error('Error cargando nombres de mesas:', error)
+        return
+      }
       if (data) {
         const mapa = {}
         data.forEach((m) => {
@@ -55,14 +70,14 @@ export default function HomePrincipal() {
         setNombresMesas(mapa)
       }
     } catch (e) {
-      console.error(e)
+      console.error('Error inesperado en cargarNombresMesas:', e)
     }
   }
 
-  // Cargar comandas desde la BD
+  // CARGA COMANDAS ACTIVAS DESDE LA BD
   const cargarComandasServidor = async () => {
     try {
-      const { data: pedidosBD } = await supabase
+      const { data: pedidosBD, error } = await supabase
         .from('pedidos')
         .select(`
           id,
@@ -72,6 +87,11 @@ export default function HomePrincipal() {
           lineas_pedido ( id, producto_nombre, precio, cantidad, destino, estado )
         `)
         .eq('estado', 'abierto')
+
+      if (error) {
+        console.error('Error al cargar comandas activas:', error)
+        return
+      }
 
       if (!pedidosBD) return
 
@@ -101,11 +121,11 @@ export default function HomePrincipal() {
       setTicketsPorMesa(nuevosTickets)
       setNotasPorMesa(nuevasNotas)
     } catch (err) {
-      console.error('Error cargando comandas:', err)
+      console.error('Error inesperado cargando comandas activas:', err)
     }
   }
 
-  // Carga inicial y canal realtime único
+  // EFFECT INICIAL + ESCUCHA EN TIEMPO REAL
   useEffect(() => {
     cargarProductos()
     cargarNombresMesas()
@@ -135,39 +155,49 @@ export default function HomePrincipal() {
 
   const renombrarMesa = async () => {
     const nombreActual = obtenerNombreMesa(mesaNum)
-    const nuevoNombre = prompt(`Nuevo nombre para ${zonaActiva} - ${nombreActual}:`, nombreActual)
+    const nuevoNombre = prompt(`Introduce un nuevo nombre para ${zonaActiva} - ${nombreActual}:`, nombreActual)
 
     if (nuevoNombre !== null && nuevoNombre.trim() !== '') {
       const nombreLimpio = nuevoNombre.trim()
-      setNombresMesas((prev) => ({ ...prev, [claveMesaActual]: nombreLimpio }))
+      setNombresMesas((prev) => ({
+        ...prev,
+        [claveMesaActual]: nombreLimpio,
+      }))
 
-      const { data: mesaBD } = await supabase
+      const { data: mesaBD, error: errBusqueda } = await supabase
         .from('mesas')
         .select('id')
         .eq('zona', zonaActiva)
         .eq('numero', mesaNum)
         .maybeSingle()
 
+      if (errBusqueda) {
+        alert(`Error al buscar mesa: ${errBusqueda.message}`)
+        return
+      }
+
       if (mesaBD) {
-        await supabase.from('mesas').update({ nombre_custom: nombreLimpio }).eq('id', mesaBD.id)
+        const { error: errUpd } = await supabase.from('mesas').update({ nombre_custom: nombreLimpio }).eq('id', mesaBD.id)
+        if (errUpd) alert(`Error al actualizar nombre: ${errUpd.message}`)
       } else {
-        await supabase.from('mesas').insert([{ zona: zonaActiva, numero: mesaNum, nombre_custom: nombreLimpio }])
+        const { error: errIns } = await supabase.from('mesas').insert([{ zona: zonaActiva, numero: mesaNum, nombre_custom: nombreLimpio }])
+        if (errIns) alert(`Error al guardar nuevo nombre: ${errIns.message}`)
       }
     }
   }
 
   const agregarAlTicket = (prod) => {
-    const unidades = Math.max(1, Number(multiplicador) || 1)
+    const cantAgregar = Math.max(1, Number(multiplicador) || 1)
     const ticketExistente = ticketsPorMesa[claveMesaActual] || []
     const existe = ticketExistente.find((item) => item.nombre === prod.nombre)
 
     let nuevoTicket = []
     if (existe) {
       nuevoTicket = ticketExistente.map((item) =>
-        item.nombre === prod.nombre ? { ...item, cantidad: item.cantidad + unidades } : item
+        item.nombre === prod.nombre ? { ...item, cantidad: item.cantidad + cantAgregar } : item
       )
     } else {
-      nuevoTicket = [...ticketExistente, { ...prod, id: `temp-${Date.now()}`, cantidad: unidades }]
+      nuevoTicket = [...ticketExistente, { ...prod, id: `temp-${Date.now()}`, cantidad: cantAgregar }]
     }
 
     setTicketsPorMesa((prev) => ({ ...prev, [claveMesaActual]: nuevoTicket }))
@@ -197,56 +227,102 @@ export default function HomePrincipal() {
 
   const obtenerOCrearMesa = async () => {
     try {
-      const { data: mesaBD } = await supabase
+      const { data: mesaBD, error: errorBusqueda } = await supabase
         .from('mesas')
         .select('id')
         .eq('numero', mesaNum)
         .eq('zona', zonaActiva)
         .maybeSingle()
 
+      if (errorBusqueda) {
+        console.error('Error buscando mesa:', errorBusqueda)
+        alert(`Error en BD al buscar la mesa: ${errorBusqueda.message}`)
+        return null
+      }
+
       if (mesaBD) return mesaBD.id
 
-      const { data: nuevaMesa } = await supabase
+      const { data: nuevaMesa, error: errorCreacion } = await supabase
         .from('mesas')
         .insert([{ numero: mesaNum, zona: zonaActiva }])
         .select('id')
         .single()
 
+      if (errorCreacion) {
+        console.error('Error creando mesa:', errorCreacion)
+        alert(`Error en BD al registrar la mesa: ${errorCreacion.message}`)
+        return null
+      }
+
       return nuevaMesa ? nuevaMesa.id : null
-    } catch {
+    } catch (err) {
+      console.error('Excepción en obtenerOCrearMesa:', err)
+      alert(`Error inesperado al gestionar la mesa: ${err.message}`)
       return null
     }
   }
 
   const enviarComanda = async () => {
-    if (ticketActual.length === 0) return
+    if (ticketActual.length === 0) {
+      alert('El ticket está vacío.')
+      return
+    }
 
     try {
       const mesaId = await obtenerOCrearMesa()
       if (!mesaId) return
 
-      const { data: pedidoExistente } = await supabase
+      // 1. Verificar si hay un pedido abierto
+      const { data: pedidoExistente, error: errPedidoExistente } = await supabase
         .from('pedidos')
         .select('id')
         .eq('mesa_id', mesaId)
         .eq('estado', 'abierto')
         .maybeSingle()
 
+      if (errPedidoExistente) {
+        alert(`Error al verificar pedido existente: ${errPedidoExistente.message}`)
+        return
+      }
+
       let pId = pedidoExistente?.id
 
+      // 2. Crear pedido si no existe
       if (!pId) {
-        const { data: nuevoPedido } = await supabase
+        const { data: nuevoPedido, error: errNuevoPedido } = await supabase
           .from('pedidos')
           .insert([{ mesa_id: mesaId, estado: 'abierto', nota: notaActual }])
           .select('id')
           .single()
+
+        if (errNuevoPedido) {
+          alert(`Error al crear pedido en BD: ${errNuevoPedido.message}`)
+          return
+        }
         if (nuevoPedido) pId = nuevoPedido.id
       } else {
-        await supabase.from('pedidos').update({ nota: notaActual }).eq('id', pId)
+        const { error: errUpdNota } = await supabase
+          .from('pedidos')
+          .update({ nota: notaActual })
+          .eq('id', pId)
+
+        if (errUpdNota) {
+          alert(`Error al actualizar la nota del pedido: ${errUpdNota.message}`)
+          return
+        }
       }
 
+      // 3. Reemplazar o insertar líneas de pedido
       if (pId) {
-        await supabase.from('lineas_pedido').delete().eq('pedido_id', pId)
+        const { error: errDelete } = await supabase
+          .from('lineas_pedido')
+          .delete()
+          .eq('pedido_id', pId)
+
+        if (errDelete) {
+          alert(`Error al actualizar líneas del pedido: ${errDelete.message}`)
+          return
+        }
 
         const lineas = ticketActual.map((item) => ({
           pedido_id: pId,
@@ -257,13 +333,20 @@ export default function HomePrincipal() {
           estado: 'pendiente',
         }))
 
-        await supabase.from('lineas_pedido').insert(lineas)
+        const { error: errInsert } = await supabase.from('lineas_pedido').insert(lineas)
+
+        if (errInsert) {
+          alert(`Error al guardar las líneas del pedido: ${errInsert.message}`)
+          return
+        }
       }
 
       setMultiplicador('1')
-      cargarComandasServidor()
+      alert(`🚀 Comanda enviada: ${zonaActiva} - ${nombreMesaActual}`)
+      await cargarComandasServidor()
     } catch (err) {
       console.error('Error al enviar comanda:', err)
+      alert(`❌ Error al enviar comanda: ${err.message || 'Error desconocido'}`)
     }
   }
 
@@ -275,7 +358,16 @@ export default function HomePrincipal() {
       const mesaId = await obtenerOCrearMesa()
 
       if (mesaId) {
-        await supabase.from('pedidos').update({ estado: 'cobrado' }).eq('mesa_id', mesaId).eq('estado', 'abierto')
+        const { error } = await supabase
+          .from('pedidos')
+          .update({ estado: 'cobrado' })
+          .eq('mesa_id', mesaId)
+          .eq('estado', 'abierto')
+
+        if (error) {
+          alert(`Error al actualizar cobro en BD: ${error.message}`)
+          return
+        }
       }
 
       setTicketsPorMesa((prev) => {
@@ -291,6 +383,7 @@ export default function HomePrincipal() {
       })
 
       setMultiplicador('1')
+      alert('💳 Cobro registrado')
       cargarComandasServidor()
     } catch (e) {
       console.error(e)
@@ -314,7 +407,11 @@ export default function HomePrincipal() {
       })
 
       if (mesaId) {
-        await supabase.from('pedidos').update({ estado: 'cancelado' }).eq('mesa_id', mesaId).eq('estado', 'abierto')
+        await supabase
+          .from('pedidos')
+          .update({ estado: 'cancelado' })
+          .eq('mesa_id', mesaId)
+          .eq('estado', 'abierto')
       }
       cargarComandasServidor()
     }
@@ -327,14 +424,26 @@ export default function HomePrincipal() {
     <>
       <style jsx global>{`
         @media print {
-          body * { visibility: hidden; }
-          #ticket-print, #ticket-print * { visibility: visible; }
-          #ticket-print {
-            position: absolute; left: 0; top: 0; width: 80mm;
-            color: #000 !important; background: #fff !important;
-            padding: 10px; font-family: monospace;
+          body * {
+            visibility: hidden;
           }
-          .no-imprimir { display: none !important; }
+          #ticket-print,
+          #ticket-print * {
+            visibility: visible;
+          }
+          #ticket-print {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 80mm;
+            color: #000 !important;
+            background: #fff !important;
+            padding: 10px;
+            font-family: monospace;
+          }
+          .no-imprimir {
+            display: none !important;
+          }
         }
       `}</style>
 
@@ -344,7 +453,9 @@ export default function HomePrincipal() {
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
               <span className="text-xl">🍹</span>
-              <h1 className="font-black text-lg tracking-wider text-amber-500 uppercase">JORCO FUSIÓN</h1>
+              <h1 className="font-black text-lg tracking-wider text-amber-500 uppercase">
+                JORCO FUSIÓN
+              </h1>
             </div>
 
             {/* SELECCIÓN DE ZONA */}
@@ -428,12 +539,21 @@ export default function HomePrincipal() {
                 ) : (
                   <div className="space-y-1.5 mt-2">
                     <div className="bg-slate-900 border border-slate-800/80 text-amber-400 text-xs font-black px-2.5 py-1.5 rounded-lg flex justify-between items-center">
-                      <span>📍 {zonaActiva} - {nombreMesaActual}</span>
-                      {notaActual && <span className="text-slate-300 font-bold truncate max-w-[120px]">👤 {notaActual}</span>}
+                      <span>
+                        📍 {zonaActiva} - {nombreMesaActual}
+                      </span>
+                      {notaActual && (
+                        <span className="text-slate-300 font-bold truncate max-w-[120px]">
+                          👤 {notaActual}
+                        </span>
+                      )}
                     </div>
 
                     {ticketActual.map((item) => (
-                      <div key={item.id} className="flex justify-between items-center py-1.5 border-b border-slate-900 text-xs">
+                      <div
+                        key={item.id}
+                        className="flex justify-between items-center py-1.5 border-b border-slate-900 text-xs"
+                      >
                         <div className="flex items-center gap-2">
                           <div className="flex items-center gap-1 bg-slate-900 p-0.5 rounded-md border border-slate-800">
                             <button
@@ -442,7 +562,9 @@ export default function HomePrincipal() {
                             >
                               -
                             </button>
-                            <span className="font-extrabold text-slate-200 px-1">{item.cantidad}</span>
+                            <span className="font-extrabold text-slate-200 px-1">
+                              {item.cantidad}
+                            </span>
                             <button
                               onClick={() => cambiarCantidadItem(item.id, 1)}
                               className="w-5 h-5 bg-emerald-500/20 text-emerald-400 font-black rounded hover:bg-emerald-500 hover:text-white transition flex items-center justify-center text-xs"
@@ -450,7 +572,9 @@ export default function HomePrincipal() {
                               +
                             </button>
                           </div>
-                          <span className="font-bold text-slate-200 line-clamp-1">{item.nombre}</span>
+                          <span className="font-bold text-slate-200 line-clamp-1">
+                            {item.nombre}
+                          </span>
                         </div>
                         <span className="font-black text-amber-400 pl-2">
                           {(Number(item.precio) * item.cantidad).toFixed(2)}€
@@ -464,7 +588,9 @@ export default function HomePrincipal() {
               {/* TOTAL MESA */}
               <div className="bg-slate-900 border border-slate-800 p-2.5 rounded-xl flex justify-between items-center mt-3">
                 <span className="text-xs font-black text-slate-400 uppercase">Total a pagar</span>
-                <span className="font-black text-2xl text-amber-400">{calcularTotal().toFixed(2)}€</span>
+                <span className="font-black text-2xl text-amber-400">
+                  {calcularTotal().toFixed(2)}€
+                </span>
               </div>
             </div>
 
@@ -524,8 +650,12 @@ export default function HomePrincipal() {
                     <span className="text-xl group-hover:scale-110 transition">{p.img || '🍽️'}</span>
                   </div>
                   <div className="flex justify-between items-end border-t border-slate-900 pt-1.5 w-full">
-                    <span className="text-[9px] text-slate-500 font-black uppercase">{p.destino}</span>
-                    <span className="text-sm font-black text-amber-400">{Number(p.precio).toFixed(2)}€</span>
+                    <span className="text-[9px] text-slate-500 font-black uppercase">
+                      {p.destino}
+                    </span>
+                    <span className="text-sm font-black text-amber-400">
+                      {Number(p.precio).toFixed(2)}€
+                    </span>
                   </div>
                 </button>
               ))}
@@ -577,12 +707,23 @@ export default function HomePrincipal() {
       <div id="ticket-print">
         <h2 style={{ textAlign: 'center', margin: '0 0 5px 0' }}>JORCO FUSIÓN</h2>
         <h3 style={{ textAlign: 'center', margin: '0 0 10px 0' }}>TICKET DE COMPRA</h3>
-        <p><strong>Zona:</strong> {zonaActiva} | <strong>Mesa:</strong> {nombreMesaActual}</p>
-        {notaActual && <p><strong>Cliente:</strong> {notaActual}</p>}
+        <p>
+          <strong>Zona:</strong> {zonaActiva} | <strong>Mesa:</strong> {nombreMesaActual}
+        </p>
+        {notaActual && (
+          <p>
+            <strong>Cliente:</strong> {notaActual}
+          </p>
+        )}
         <hr />
         {ticketActual.map((item) => (
-          <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', margin: '4px 0' }}>
-            <span>{item.cantidad}x {item.nombre}</span>
+          <div
+            key={item.id}
+            style={{ display: 'flex', justifyContent: 'space-between', margin: '4px 0' }}
+          >
+            <span>
+              {item.cantidad}x {item.nombre}
+            </span>
             <span>{(Number(item.precio) * item.cantidad).toFixed(2)}€</span>
           </div>
         ))}
