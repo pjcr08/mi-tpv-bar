@@ -7,7 +7,7 @@ export default function PantallaBarra() {
   const [comandas, setComandas] = useState([])
   const [cargando, setCargando] = useState(true)
 
-  // Cargar comandas pendientes cuyo destino sea 'barra'
+  // Cargar comandas pendientes y agruparlas por pedido_id
   const cargarComandasBarra = async () => {
     try {
       const { data, error } = await supabase
@@ -32,14 +32,39 @@ export default function PantallaBarra() {
         `)
         .eq('destino', 'barra')
         .eq('estado', 'pendiente')
-        .order('created_at', { ascending: true }) // Usa 'created_at' con guion bajo
+        .order('created_at', { ascending: true })
 
       if (error) {
         console.error('Error cargando barra:', error.message)
         return
       }
 
-      setComandas(data || [])
+      // AGRUPACIÓN POR PEDIDO_ID
+      const agrupadosMap = {}
+
+      ;(data || []).forEach((linea) => {
+        const pId = linea.pedido_id
+
+        if (!agrupadosMap[pId]) {
+          agrupadosMap[pId] = {
+            pedidoId: pId,
+            mesa: linea.pedidos?.mesas,
+            nota: linea.pedidos?.nota,
+            horaMasAntigua: linea.created_at,
+            lineas: [],
+          }
+        }
+
+        agrupadosMap[pId].lineas.push({
+          id: linea.id,
+          producto_nombre: linea.producto_nombre,
+          cantidad: linea.cantidad,
+          created_at: linea.created_at,
+        })
+      })
+
+      // Convertir a array para renderizar
+      setComandas(Object.values(agrupadosMap))
     } catch (err) {
       console.error('Excepción en barra:', err)
     } finally {
@@ -47,8 +72,8 @@ export default function PantallaBarra() {
     }
   }
 
-  // Marcar una línea de comanda como 'listo'
-  const marcarComoListo = async (idLinea) => {
+  // Marcar una sola línea como 'listo'
+  const marcarLineaComoListo = async (idLinea) => {
     try {
       const { error } = await supabase
         .from('lineas_pedido')
@@ -60,19 +85,39 @@ export default function PantallaBarra() {
         return
       }
 
-      // Actualizar vista local
-      setComandas((prev) => prev.filter((item) => item.id !== idLinea))
+      // Refrescar para reorganizar los grupos
+      cargarComandasBarra()
     } catch (e) {
-      console.error('Error al completar pedido:', e)
+      console.error('Error al completar item:', e)
+    }
+  }
+
+  // Marcar TODAS las líneas de la mesa/pedido como 'listo'
+  const marcarPedidoCompletoComoListo = async (lineas) => {
+    try {
+      const ids = lineas.map((l) => l.id)
+
+      const { error } = await supabase
+        .from('lineas_pedido')
+        .update({ estado: 'listo' })
+        .in('id', ids)
+
+      if (error) {
+        alert(`Error al actualizar estado: ${error.message}`)
+        return
+      }
+
+      cargarComandasBarra()
+    } catch (e) {
+      console.error('Error al completar pedido completo:', e)
     }
   }
 
   useEffect(() => {
     cargarComandasBarra()
 
-    // Suscripción en tiempo real a la tabla lineas_pedido
     const channel = supabase
-      .channel('realtime-barra')
+      .channel('realtime-barra-agrupado')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'lineas_pedido' },
@@ -87,18 +132,31 @@ export default function PantallaBarra() {
     }
   }, [])
 
+  const totalBebidasPendientes = comandas.reduce(
+    (acc, grupo) => acc + grupo.lineas.reduce((sum, l) => sum + l.cantidad, 0),
+    0
+  )
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 p-4 font-sans select-none">
+    <div className="min-h-screen bg-slate-950 text-slate-100 p-4 font-sans select-none antialiased">
       {/* CABECERA */}
       <header className="bg-slate-900 border border-slate-800 rounded-2xl p-4 mb-6 flex justify-between items-center shadow-lg">
         <div className="flex items-center gap-3">
           <span className="text-3xl">🍹</span>
-          <h1 className="text-2xl font-black text-amber-500 uppercase tracking-wider">
-            PANTALLA DE BARRA
-          </h1>
+          <div>
+            <h1 className="text-2xl font-black text-amber-500 uppercase tracking-wider">
+              PANTALLA DE BARRA
+            </h1>
+            <p className="text-xs text-slate-400 font-medium">Comandas agrupadas por mesa</p>
+          </div>
         </div>
-        <div className="bg-amber-500/10 border border-amber-500/30 px-4 py-1.5 rounded-xl text-amber-400 font-extrabold text-sm">
-          Pendientes: {comandas.length}
+        <div className="flex gap-2">
+          <div className="bg-slate-800 border border-slate-700 px-3 py-1.5 rounded-xl text-slate-300 font-bold text-xs flex items-center">
+            Mesas: {comandas.length}
+          </div>
+          <div className="bg-amber-500/10 border border-amber-500/30 px-4 py-1.5 rounded-xl text-amber-400 font-extrabold text-sm flex items-center">
+            Bebidas: {totalBebidasPendientes}
+          </div>
         </div>
       </header>
 
@@ -113,52 +171,76 @@ export default function PantallaBarra() {
           <p className="text-lg font-bold">Sin bebidas ni cafés pendientes</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {comandas.map((item) => {
-            const mesa = item.pedidos?.mesas
-            const nota = item.pedidos?.nota
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 items-start">
+          {comandas.map((grupo) => {
+            const mesa = grupo.mesa
+            const nota = grupo.nota
 
             return (
               <div
-                key={item.id}
-                className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between shadow-xl hover:border-amber-500/50 transition-all"
+                key={grupo.pedidoId}
+                className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between shadow-xl hover:border-amber-500/40 transition-all"
               >
                 <div>
-                  {/* CABECERA TARJETA */}
-                  <div className="flex justify-between items-start pb-2 border-b border-slate-800 mb-3">
-                    <span className="bg-amber-500 text-slate-950 font-black text-xs px-2.5 py-1 rounded-lg uppercase">
-                      {mesa ? `${mesa.zona} - Mesa ${mesa.numero}` : 'Mesa S/N'}
+                  {/* CABECERA MESA */}
+                  <div className="flex justify-between items-start pb-3 border-b border-slate-800 mb-3">
+                    <span className="bg-amber-500 text-slate-950 font-black text-xs px-3 py-1 rounded-lg uppercase tracking-wider">
+                      {mesa ? `${mesa.zona} — Mesa ${mesa.numero}` : 'Mesa S/N'}
                     </span>
-                    <span className="text-[10px] text-slate-500 font-mono">
-                      {item.created_at ? new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-                    </span>
-                  </div>
-
-                  {/* PRODUCTO Y CANTIDAD */}
-                  <div className="flex items-center gap-3 my-2">
-                    <span className="text-2xl font-black text-amber-400 bg-amber-500/10 px-3 py-1 rounded-xl border border-amber-500/20">
-                      {item.cantidad}x
-                    </span>
-                    <span className="text-lg font-extrabold text-slate-100 leading-tight">
-                      {item.producto_nombre}
+                    <span className="text-[10px] text-slate-400 font-mono">
+                      {grupo.horaMasAntigua
+                        ? new Date(grupo.horaMasAntigua).toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })
+                        : ''}
                     </span>
                   </div>
 
-                  {/* NOTA O ALIAS DEL CLIENTE */}
+                  {/* ALIAS O NOTA DEL CLIENTE */}
                   {nota && (
-                    <div className="mt-2 bg-slate-950 p-2 rounded-lg border border-slate-800 text-xs text-amber-300 font-semibold">
-                      👤 {nota}
+                    <div className="mb-3 bg-slate-950 p-2 rounded-xl border border-slate-800 text-xs text-amber-300 font-bold flex items-center gap-1.5">
+                      <span>👤</span>
+                      <span>{nota}</span>
                     </div>
                   )}
+
+                  {/* LISTA DE LÍNEAS DE LA MESA */}
+                  <div className="space-y-2 my-2">
+                    {grupo.lineas.map((linea) => (
+                      <div
+                        key={linea.id}
+                        className="flex items-center justify-between bg-slate-950/60 border border-slate-800/80 p-2.5 rounded-xl hover:border-slate-700 transition"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <span className="text-sm font-black text-amber-400 bg-amber-500/10 px-2.5 py-0.5 rounded-lg border border-amber-500/20">
+                            {linea.cantidad}x
+                          </span>
+                          <span className="text-sm font-bold text-slate-100">
+                            {linea.producto_nombre}
+                          </span>
+                        </div>
+
+                        {/* Botón individual por producto */}
+                        <button
+                          onClick={() => marcarLineaComoListo(linea.id)}
+                          title="Marcar solo esta bebida"
+                          className="w-7 h-7 bg-emerald-950/60 hover:bg-emerald-600 text-emerald-400 hover:text-white border border-emerald-500/30 rounded-lg flex items-center justify-center font-bold text-xs transition active:scale-90"
+                        >
+                          ✓
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
-                {/* BOTÓN DESPACHAR / LISTO */}
+                {/* BOTÓN DESPACHAR TODO EL PEDIDO */}
                 <button
-                  onClick={() => marcarComoListo(item.id)}
+                  onClick={() => marcarPedidoCompletoComoListo(grupo.lineas)}
                   className="mt-4 w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase rounded-xl transition active:scale-95 shadow-lg shadow-emerald-600/10 flex items-center justify-center gap-2"
                 >
                   <span>✓</span>
-                  <span>Marcar como Listo</span>
+                  <span>Despachar Mesa Completa</span>
                 </button>
               </div>
             )
