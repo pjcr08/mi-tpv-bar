@@ -38,6 +38,7 @@ export default function HomePrincipal() {
     cargarNombresMesas()
     cargarComandasServidor()
 
+    // ESCUCHA EN TIEMPO REAL (REALTIME DE SUPABASE)
     const channel = supabase
       .channel('tpv-realtime-home')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, () => {
@@ -86,6 +87,7 @@ export default function HomePrincipal() {
     }
   }
 
+  // Carga las comandas activas sincronizadas desde la BD / PDA
   const cargarComandasServidor = async () => {
     try {
       const { data: pedidosBD } = await supabase
@@ -95,7 +97,7 @@ export default function HomePrincipal() {
           nota,
           mesa_id,
           mesas ( zona, numero ),
-          lineas_pedido ( id, producto_nombre, precio, cantidad, destino )
+          lineas_pedido ( id, producto_nombre, precio, cantidad, destino, estado )
         `)
         .eq('estado', 'abierto')
 
@@ -108,12 +110,19 @@ export default function HomePrincipal() {
         if (ped.mesas) {
           const clave = `${ped.mesas.zona}-${ped.mesas.numero}`
           nuevasNotas[clave] = ped.nota || ''
-          nuevosTickets[clave] = (ped.lineas_pedido || []).map((l) => ({
+
+          // Carga únicamente las líneas que no estén canceladas o ya cobradas
+          const lineasValidas = (ped.lineas_pedido || []).filter(
+            (l) => l.estado !== 'cancelado' && l.estado !== 'cobrado'
+          )
+
+          nuevosTickets[clave] = lineasValidas.map((l) => ({
             id: l.id,
             nombre: l.producto_nombre,
             precio: Number(l.precio),
             cantidad: l.cantidad,
             destino: l.destino,
+            estado: l.estado,
           }))
         }
       })
@@ -223,15 +232,34 @@ export default function HomePrincipal() {
 
     try {
       const mesaId = await obtenerOCrearMesa()
-      const { data: pedido } = await supabase
+      
+      // Consultar si la mesa ya tiene un pedido en estado 'abierto'
+      const { data: pedidoExistente } = await supabase
         .from('pedidos')
-        .insert([{ mesa_id: mesaId, estado: 'abierto', nota: notaActual }])
-        .select()
-        .single()
+        .select('id')
+        .eq('mesa_id', mesaId)
+        .eq('estado', 'abierto')
+        .maybeSingle()
 
-      if (pedido) {
+      let pId = pedidoExistente?.id
+
+      if (!pId) {
+        const { data: nuevoPedido } = await supabase
+          .from('pedidos')
+          .insert([{ mesa_id: mesaId, estado: 'abierto', nota: notaActual }])
+          .select()
+          .single()
+        if (nuevoPedido) pId = nuevoPedido.id
+      } else {
+        await supabase.from('pedidos').update({ nota: notaActual }).eq('id', pId)
+      }
+
+      if (pId) {
+        // Eliminar líneas anteriores de este pedido para reescribir con las nuevas
+        await supabase.from('lineas_pedido').delete().eq('pedido_id', pId)
+
         const lineas = ticketActual.map((item) => ({
-          pedido_id: pedido.id,
+          pedido_id: pId,
           producto_nombre: item.nombre,
           precio: item.precio,
           cantidad: item.cantidad,
@@ -243,7 +271,8 @@ export default function HomePrincipal() {
       }
 
       setMultiplicador(1)
-      alert(`🚀 Comanda enviada a cocina/barra: ${zonaActiva} - ${nombreMesaActual}`)
+      alert(`🚀 Comanda enviada: ${zonaActiva} - ${nombreMesaActual}`)
+      cargarComandasServidor()
     } catch (err) {
       alert(`❌ Error al enviar comanda: ${err.message || 'Error de conexión'}`)
     }
@@ -256,25 +285,7 @@ export default function HomePrincipal() {
       window.print()
       const mesaId = await obtenerOCrearMesa()
 
-      const { data: pedido } = await supabase
-        .from('pedidos')
-        .insert([{ mesa_id: mesaId, estado: 'cobrado', nota: notaActual }])
-        .select()
-        .single()
-
-      if (pedido) {
-        const lineas = ticketActual.map((item) => ({
-          pedido_id: pedido.id,
-          producto_nombre: item.nombre,
-          precio: item.precio,
-          cantidad: item.cantidad,
-          destino: item.destino || 'barra',
-          estado: 'cobrado',
-        }))
-
-        await supabase.from('lineas_pedido').insert(lineas)
-      }
-
+      // Marcar comandas abiertas como cobradas
       await supabase.from('pedidos').update({ estado: 'cobrado' }).eq('mesa_id', mesaId).eq('estado', 'abierto')
 
       const copiaTickets = { ...ticketsPorMesa }
@@ -286,7 +297,8 @@ export default function HomePrincipal() {
       setNotasPorMesa(copiaNotas)
 
       setMultiplicador(1)
-      alert('💳 Cobro registrado con éxito')
+      alert('💳 Cobro registrado')
+      cargarComandasServidor()
     } catch (e) {
       console.error(e)
     }
@@ -306,6 +318,7 @@ export default function HomePrincipal() {
       if (mesaId) {
         await supabase.from('pedidos').update({ estado: 'cancelado' }).eq('mesa_id', mesaId).eq('estado', 'abierto')
       }
+      cargarComandasServidor()
     }
   }
 
