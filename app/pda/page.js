@@ -4,57 +4,60 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 
 export default function PdaView() {
-  // Autenticación
+  // Autenticación Real Supabase
   const [usuario, setUsuario] = useState(null)
   const [emailInput, setEmailInput] = useState('')
   const [passInput, setPassInput] = useState('')
   const [errorLogin, setErrorLogin] = useState('')
+  const [cargandoAuth, setCargandoAuth] = useState(false)
 
   // Control Fichaje
   const [fichado, setFichado] = useState(false)
   const [horaFichaje, setHoraFichaje] = useState(null)
 
-  // Modales
-  const [modalStockAbierto, setModalStockAbierto] = useState(false)
-  const [modalTurnosAbierto, setModalTurnosAbierto] = useState(false)
-  const [faltaTextoManual, setFaltaTextoManual] = useState('')
-  const [listaFaltas, setListaFaltas] = useState([])
-
-  // Turnos
-  const [turnos, setTurnos] = useState({
-    'Viernes Noche': [],
-    'Sábado Mañana': [],
-    'Sábado Noche': [],
-    'Domingo Mañana': [],
-    'Domingo Noche': [],
-    'Festivo': [],
-  })
-
   // Estados TPV / PDA
   const [zonaActiva, setZonaActiva] = useState('Terraza')
   const [mesaNum, setMesaNum] = useState(1)
   const [nombresMesas, setNombresMesas] = useState({})
+  const [mesasOcupadasMap, setMesasOcupadasMap] = useState({}) // Mapeo de mesas abiertas en la BD
+
   const [productos, setProductos] = useState([])
   const [familias, setFamilias] = useState([])
   const [familiaActiva, setFamiliaActiva] = useState('')
-  
-  // Estado global de comandas sincronizadas
+
+  // Estado del pedido de la mesa seleccionada
   const [comandaActual, setComandaActual] = useState([])
   const [pedidoIdActual, setPedidoIdActual] = useState(null)
   const [aliasActual, setAliasActual] = useState('')
-  
+
+  // Modales UI
   const [modalMesaAbierto, setModalMesaAbierto] = useState(false)
   const [verComandaMobile, setVerComandaMobile] = useState(false)
 
-  // Carga inicial
+  // 1. Comprobar sesión activa de Supabase
+  useEffect(() => {
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session?.user) {
+        setUsuario(session.user)
+      }
+    }
+    checkSession()
+  }, [])
+
+  // 2. Cargar datos iniciales y listeners Globales
   useEffect(() => {
     cargarProductos()
     cargarNombresMesas()
+    cargarMesasOcupadas()
 
     const channelMesas = supabase
       .channel('mesas-pda-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mesas' }, () => {
         cargarNombresMesas()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, () => {
+        cargarMesasOcupadas()
       })
       .subscribe()
 
@@ -63,37 +66,53 @@ export default function PdaView() {
     }
   }, [])
 
-  // Sincronización en tiempo real del pedido de la mesa seleccionada
+  // 3. Sincronizar el pedido de la mesa activa en tiempo real
   useEffect(() => {
     cargarPedidoMesaActual()
 
-    const channelPedidos = supabase
-      .channel('lineas-pda-realtime')
+    const channelPedidoActivo = supabase
+      .channel('pedido-activo-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'lineas_pedido' }, () => {
         cargarPedidoMesaActual()
+        cargarMesasOcupadas()
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, () => {
         cargarPedidoMesaActual()
+        cargarMesasOcupadas()
       })
       .subscribe()
 
     return () => {
-      supabase.removeChannel(channelPedidos)
+      supabase.removeChannel(channelPedidoActivo)
     }
   }, [zonaActiva, mesaNum])
 
-  const handleLogin = (e) => {
+  // Login Auténtico con Supabase Auth
+  const handleLogin = async (e) => {
     e.preventDefault()
-    if (!emailInput || !passInput) {
-      setErrorLogin('Por favor, rellena email y contraseña.')
-      return
-    }
-    const nombreUsuario = emailInput.split('@')[0]
-    setUsuario({ email: emailInput, nombre: nombreUsuario.toUpperCase() })
     setErrorLogin('')
+    setCargandoAuth(true)
+
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: emailInput,
+        password: passInput,
+      })
+
+      if (error) {
+        setErrorLogin('Credenciales inválidas. Verifica tu email y contraseña.')
+      } else if (data.user) {
+        setUsuario(data.user)
+      }
+    } catch (err) {
+      setErrorLogin('Error al conectar con el servidor.')
+    } finally {
+      setCargandoAuth(false)
+    }
   }
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
     setUsuario(null)
     setEmailInput('')
     setPassInput('')
@@ -104,10 +123,8 @@ export default function PdaView() {
     if (!fichado) {
       setFichado(true)
       setHoraFichaje(ahora)
-      alert(`⏰ Entrada fichada a las ${ahora}`)
     } else {
       setFichado(false)
-      alert(`🛑 Salida fichada. Entrada previa: ${horaFichaje}`)
       setHoraFichaje(null)
     }
   }
@@ -142,7 +159,45 @@ export default function PdaView() {
     }
   }
 
-  // Carga el pedido activo de la mesa desde la base de datos
+  // Detecta qué mesas están abiertas en el sistema central para marcarlas en rojo
+  const cargarMesasOcupadas = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('pedidos')
+        .select(`
+          id,
+          mesa_id,
+          mesas (
+            zona,
+            numero
+          ),
+          lineas_pedido (
+            precio,
+            cantidad
+          )
+        `)
+        .eq('estado', 'abierto')
+
+      if (error || !data) return
+
+      const ocupadas = {}
+      data.forEach((p) => {
+        if (p.mesas) {
+          const clave = `${p.mesas.zona}-${p.mesas.numero}`
+          const totalMesa = p.lineas_pedido?.reduce((sum, l) => sum + Number(l.precio) * l.cantidad, 0) || 0
+          ocupadas[clave] = {
+            pedidoId: p.id,
+            total: totalMesa,
+          }
+        }
+      })
+      setMesasOcupadasMap(ocupadas)
+    } catch (e) {
+      console.error('Error cargando estado de ocupación de mesas:', e)
+    }
+  }
+
+  // Carga las líneas de pedido de la mesa seleccionada actualmente
   const cargarPedidoMesaActual = async () => {
     try {
       const { data: mesa } = await supabase
@@ -194,7 +249,7 @@ export default function PdaView() {
         )
       }
     } catch (err) {
-      console.error('Error cargando pedido de la mesa:', err)
+      console.error('Error cargando comanda de la mesa:', err)
     }
   }
 
@@ -203,7 +258,7 @@ export default function PdaView() {
     return nombresMesas[clave] || `Mesa ${num}`
   }
 
-  // Agregar producto directamente a la BD
+  // Añadir ítem sincronizado directamente con la BD
   const agregarAlTicket = async (prod) => {
     try {
       let pId = pedidoIdActual
@@ -240,6 +295,7 @@ export default function PdaView() {
         }
       }
 
+      // Si el ítem está aún en estado 'borrador', sumamos la cantidad
       const itemExistente = comandaActual.find((i) => i.nombre === prod.nombre && i.estado === 'borrador')
 
       if (itemExistente) {
@@ -254,13 +310,14 @@ export default function PdaView() {
             producto_nombre: prod.nombre,
             precio: prod.precio,
             cantidad: 1,
-            destino: prod.destino || 'barra',
+            destino: prod.destino || 'barra', // Destino correcto (barra/cocina)
             estado: 'borrador',
           },
         ])
       }
 
       cargarPedidoMesaActual()
+      cargarMesasOcupadas()
     } catch (err) {
       console.error('Error añadiendo ítem:', err)
     }
@@ -276,9 +333,10 @@ export default function PdaView() {
     }
 
     cargarPedidoMesaActual()
+    cargarMesasOcupadas()
   }
 
-  // Cambia el estado de los borradores a 'pendiente' para que aparezcan en Barra/Cocina
+  // Pasa los ítems de 'borrador' a 'pendiente' para enviarlos a Cocina / Barra
   const enviarComandaBD = async () => {
     if (!pedidoIdActual || comandaActual.length === 0) return
 
@@ -289,14 +347,16 @@ export default function PdaView() {
         .eq('pedido_id', pedidoIdActual)
         .eq('estado', 'borrador')
 
-      await supabase
-        .from('pedidos')
-        .update({ nota: aliasActual })
-        .eq('id', pedidoIdActual)
+      if (aliasActual) {
+        await supabase
+          .from('pedidos')
+          .update({ nota: aliasActual })
+          .eq('id', pedidoIdActual)
+      }
 
-      alert('🚀 ¡Comanda enviada a barra, cocina y TPV central!')
       setVerComandaMobile(false)
       cargarPedidoMesaActual()
+      cargarMesasOcupadas()
     } catch (err) {
       alert(`❌ Error al enviar: ${err.message}`)
     }
@@ -309,22 +369,24 @@ export default function PdaView() {
   const productosFiltrados = productos.filter((p) => p.familia === familiaActiva)
   const opcionesMesas = Array.from({ length: 20 }, (_, i) => i + 1)
 
+  // VISTA 1: LOGIN EMPLEADO
   if (!usuario) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4 font-sans select-none">
         <div className="w-full max-w-sm bg-slate-900 border border-slate-800 p-6 rounded-3xl shadow-2xl">
           <div className="text-center mb-6">
-            <span className="text-4xl block mb-2">📱</span>
-            <h1 className="text-2xl font-black text-amber-500 uppercase tracking-wider">JORCO FUSIÓN</h1>
-            <p className="text-xs text-slate-400 font-medium">Terminal PDA Camarero</p>
+            <span className="text-5xl block mb-2">📱</span>
+            <h1 className="text-2xl font-black text-amber-500 uppercase tracking-wider">PDA CAMARERO</h1>
+            <p className="text-xs text-slate-400 font-medium mt-1">Acceso individual con usuario y contraseña</p>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
-              <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Usuario / Email</label>
+              <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Email Camarero</label>
               <input
-                type="text"
-                placeholder="camarero@jorco.com"
+                type="email"
+                required
+                placeholder="camarero@bar.com"
                 value={emailInput}
                 onChange={(e) => setEmailInput(e.target.value)}
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm font-bold text-slate-100 focus:outline-none focus:border-amber-500"
@@ -335,6 +397,7 @@ export default function PdaView() {
               <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Contraseña</label>
               <input
                 type="password"
+                required
                 placeholder="••••••••"
                 value={passInput}
                 onChange={(e) => setPassInput(e.target.value)}
@@ -346,9 +409,10 @@ export default function PdaView() {
 
             <button
               type="submit"
-              className="w-full py-3.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm uppercase rounded-xl shadow-lg shadow-amber-500/10 active:scale-95 transition"
+              disabled={cargandoAuth}
+              className="w-full py-3.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-black text-sm uppercase rounded-xl shadow-lg active:scale-95 transition"
             >
-              Iniciar Sesión
+              {cargandoAuth ? 'Ingresando...' : 'Entrar a Comandar'}
             </button>
           </form>
         </div>
@@ -356,65 +420,56 @@ export default function PdaView() {
     )
   }
 
+  // VISTA 2: PRINCIPAL PDA MÓVIL
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none pb-20">
-      {/* BARRA SUPERIOR */}
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none pb-24">
+      {/* BARRA SUPERIOR PDA */}
       <header className="bg-slate-900 border-b border-slate-800 p-3 flex justify-between items-center sticky top-0 z-30">
         <button
           onClick={() => setModalMesaAbierto(true)}
-          className="bg-amber-500 text-slate-950 font-black px-3 py-1.5 rounded-xl text-xs uppercase flex items-center gap-1 active:scale-95 transition shadow"
+          className="bg-amber-500 text-slate-950 font-black px-3.5 py-2 rounded-xl text-xs uppercase flex items-center gap-1.5 active:scale-95 transition shadow-md"
         >
           <span>📍 {zonaActiva} - {obtenerNombreMesa(mesaNum)}</span>
           <span className="text-[10px]">▼</span>
         </button>
 
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setModalStockAbierto(true)}
-            title="Stock"
-            className="p-2 bg-slate-800 text-amber-400 rounded-xl text-xs border border-slate-700"
-          >
-            📦
-          </button>
-
-          <button
-            onClick={() => setModalTurnosAbierto(true)}
-            title="Turnos"
-            className="p-2 bg-slate-800 text-amber-400 rounded-xl text-xs border border-slate-700"
-          >
-            📅
-          </button>
-
+          {/* FICHAJE CAMARERO */}
           <button
             onClick={toggleFichaje}
-            className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase transition border ${
+            className={`px-3 py-1.5 rounded-xl text-[11px] font-black uppercase transition border ${
               fichado
                 ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
-                : 'bg-rose-500/20 text-rose-400 border-rose-500/40'
+                : 'bg-slate-800 text-slate-400 border-slate-700'
             }`}
           >
             {fichado ? `⏰ ${horaFichaje}` : '⏹️ Fichar'}
           </button>
 
-          <button onClick={handleLogout} className="text-slate-500 hover:text-slate-300 font-bold text-xs p-1">
-            ✕
+          {/* CERRAR SESIÓN */}
+          <button
+            onClick={handleLogout}
+            title="Cerrar sesión"
+            className="p-1.5 bg-slate-800 text-slate-400 hover:text-white rounded-xl border border-slate-700 active:scale-90"
+          >
+            🚪
           </button>
         </div>
       </header>
 
       {/* INPUT ALIAS CLIENTE */}
-      <div className="bg-slate-900/50 p-2 border-b border-slate-800/80 flex items-center gap-2 px-3">
+      <div className="bg-slate-900/40 p-2 border-b border-slate-800/80 flex items-center gap-2 px-3">
         <span className="text-xs">👤</span>
         <input
           type="text"
-          placeholder="Nombre o descripción (ej: Gorra roja)"
+          placeholder="Nombre o nota (ej: Gorra roja)"
           value={aliasActual}
           onChange={(e) => setAliasActual(e.target.value)}
-          className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1 text-xs font-bold text-amber-300 placeholder-slate-600 focus:outline-none"
+          className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1 text-xs font-bold text-amber-300 placeholder-slate-600 focus:outline-none focus:border-amber-500/50"
         />
       </div>
 
-      {/* FAMILIAS */}
+      {/* CATEGORÍAS / FAMILIAS */}
       <div className="flex gap-1.5 p-2 overflow-x-auto bg-slate-950 border-b border-slate-900 scrollbar-none">
         {familias.map((f) => (
           <button
@@ -431,37 +486,41 @@ export default function PdaView() {
         ))}
       </div>
 
-      {/* PRODUCTOS */}
+      {/* GRILLA DE PRODUCTOS (OPTIMIZADA PARA MÓVIL) */}
       <div className="p-2 grid grid-cols-2 gap-2 flex-1 overflow-y-auto">
         {productosFiltrados.map((p) => (
           <button
             key={p.id}
             onClick={() => agregarAlTicket(p)}
-            className="bg-slate-900 border border-slate-800 hover:border-amber-500/50 p-3 rounded-2xl flex flex-col justify-between h-28 active:scale-95 transition text-left"
+            className="bg-slate-900 border border-slate-800 active:border-amber-500 p-3 rounded-2xl flex flex-col justify-between h-24 active:scale-95 transition text-left"
           >
             <div className="flex justify-between items-start w-full">
-              <span className="font-extrabold text-xs text-slate-200 line-clamp-2">{p.nombre}</span>
-              <span className="text-xl">{p.img || '🍽️'}</span>
+              <span className="font-extrabold text-xs text-slate-200 line-clamp-2 leading-tight">
+                {p.nombre}
+              </span>
+              <span className="text-lg">{p.img || '🍴'}</span>
             </div>
-            <div className="flex justify-between items-end w-full border-t border-slate-800/60 pt-1.5">
-              <span className="text-[9px] font-black uppercase text-slate-500">{p.destino}</span>
-              <span className="font-black text-sm text-amber-400">{Number(p.precio).toFixed(2)}€</span>
+            <div className="flex justify-between items-end w-full border-t border-slate-800/60 pt-1">
+              <span className={`text-[9px] font-black uppercase ${p.destino === 'cocina' ? 'text-rose-400' : 'text-amber-400'}`}>
+                {p.destino}
+              </span>
+              <span className="font-black text-xs text-amber-400">{Number(p.precio).toFixed(2)}€</span>
             </div>
           </button>
         ))}
       </div>
 
-      {/* BARRA FLOTANTE ENVIAR */}
+      {/* BARRA INFERIOR FIJA - ENVIAR PEDIDO */}
       <div className="fixed bottom-0 left-0 right-0 p-3 bg-slate-900 border-t border-slate-800 flex justify-between items-center gap-2 z-20">
         <button
           onClick={() => setVerComandaMobile(true)}
-          className="flex-1 bg-slate-950 border border-slate-800 px-4 py-2.5 rounded-2xl flex justify-between items-center"
+          className="flex-1 bg-slate-950 border border-slate-800 px-3.5 py-2.5 rounded-2xl flex justify-between items-center active:scale-98"
         >
           <div className="flex items-center gap-2">
             <span className="bg-amber-500 text-slate-950 font-black text-xs px-2 py-0.5 rounded-full">
               {comandaActual.reduce((s, i) => s + i.cantidad, 0)}
             </span>
-            <span className="text-xs font-bold text-slate-300">Ver Pedido</span>
+            <span className="text-xs font-bold text-slate-300">Ver Ticket</span>
           </div>
           <span className="font-black text-amber-400 text-sm">{calcularTotal().toFixed(2)}€</span>
         </button>
@@ -475,19 +534,19 @@ export default function PdaView() {
         </button>
       </div>
 
-      {/* MODAL COMANDA */}
+      {/* MODAL REVISIÓN TICKET DE LA MESA */}
       {verComandaMobile && (
-        <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-sm z-50 flex flex-col p-4">
+        <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-md z-50 flex flex-col p-4">
           <div className="flex justify-between items-center pb-3 border-b border-slate-800">
             <div>
               <h2 className="font-black text-amber-500 text-base uppercase">
-                {zonaActiva} - {obtenerNombreMesa(mesaNum)}
+                {zonaActiva} — {obtenerNombreMesa(mesaNum)}
               </h2>
               {aliasActual && <p className="text-xs text-amber-300 font-bold">👤 {aliasActual}</p>}
             </div>
             <button
               onClick={() => setVerComandaMobile(false)}
-              className="w-8 h-8 bg-slate-800 text-slate-300 font-bold rounded-full"
+              className="w-8 h-8 bg-slate-800 text-slate-300 font-bold rounded-full flex items-center justify-center"
             >
               ✕
             </button>
@@ -495,36 +554,36 @@ export default function PdaView() {
 
           <div className="flex-1 overflow-y-auto py-4 space-y-2">
             {comandaActual.length === 0 ? (
-              <p className="text-center text-slate-500 text-xs py-10">No hay productos en esta mesa.</p>
+              <p className="text-center text-slate-500 text-xs py-10">Mesa sin consumiciones añadidas.</p>
             ) : (
               comandaActual.map((item) => (
                 <div
                   key={item.id_linea}
                   className="bg-slate-900 border border-slate-800 p-3 rounded-2xl flex justify-between items-center"
                 >
-                  <div>
-                    <span className="font-bold text-xs text-slate-100 block">{item.nombre}</span>
+                  <div className="max-w-[50%]">
+                    <span className="font-bold text-xs text-slate-100 block truncate">{item.nombre}</span>
                     <span className="text-[10px] text-slate-400">
-                      {item.precio.toFixed(2)}€ / ud — <span className="uppercase text-amber-500">{item.estado}</span>
+                      {item.precio.toFixed(2)}€/ud — <span className="uppercase text-amber-400">{item.estado}</span>
                     </span>
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 p-1 rounded-xl">
                       <button
                         onClick={() => cambiarCantidad(item, -1)}
-                        className="w-6 h-6 bg-rose-500/20 text-rose-400 font-black rounded-lg text-xs"
+                        className="w-7 h-7 bg-rose-500/20 text-rose-400 font-black rounded-lg text-xs flex items-center justify-center active:scale-90"
                       >
                         -
                       </button>
-                      <span className="font-black text-xs px-2">{item.cantidad}</span>
+                      <span className="font-black text-xs px-1.5">{item.cantidad}</span>
                       <button
                         onClick={() => cambiarCantidad(item, 1)}
-                        className="w-6 h-6 bg-emerald-500/20 text-emerald-400 font-black rounded-lg text-xs"
+                        className="w-7 h-7 bg-emerald-500/20 text-emerald-400 font-black rounded-lg text-xs flex items-center justify-center active:scale-90"
                       >
                         +
                       </button>
                     </div>
-                    <span className="font-black text-sm text-amber-400 w-14 text-right">
+                    <span className="font-black text-xs text-amber-400 w-12 text-right">
                       {(item.precio * item.cantidad).toFixed(2)}€
                     </span>
                   </div>
@@ -535,7 +594,7 @@ export default function PdaView() {
 
           <div className="pt-3 border-t border-slate-800 space-y-3">
             <div className="flex justify-between items-center text-base font-black">
-              <span>TOTAL</span>
+              <span>TOTAL ACUMULADO</span>
               <span className="text-amber-400 text-xl">{calcularTotal().toFixed(2)}€</span>
             </div>
             <button
@@ -549,27 +608,28 @@ export default function PdaView() {
         </div>
       )}
 
-      {/* MODAL MESA */}
+      {/* MODAL SELECTOR MESA (VISUALIZADOR MESA ROJA / VERDE) */}
       {modalMesaAbierto && (
-        <div className="fixed inset-0 bg-slate-950/90 z-50 p-4 flex flex-col justify-between">
+        <div className="fixed inset-0 bg-slate-950/95 z-50 p-4 flex flex-col justify-between">
           <div>
             <div className="flex justify-between items-center mb-4">
               <h2 className="font-black text-amber-500 text-sm uppercase">Seleccionar Ubicación</h2>
               <button
                 onClick={() => setModalMesaAbierto(false)}
-                className="w-8 h-8 bg-slate-800 text-slate-300 font-bold rounded-full"
+                className="w-8 h-8 bg-slate-800 text-slate-300 font-bold rounded-full flex items-center justify-center"
               >
                 ✕
               </button>
             </div>
 
+            {/* ZONAS */}
             <div className="flex gap-2 mb-4">
               {['Terraza', 'Salón', 'Barra'].map((z) => (
                 <button
                   key={z}
                   onClick={() => setZonaActiva(z)}
-                  className={`flex-1 py-2 rounded-xl text-xs font-black uppercase transition ${
-                    zonaActiva === z ? 'bg-amber-500 text-slate-950' : 'bg-slate-900 text-slate-400'
+                  className={`flex-1 py-2.5 rounded-xl text-xs font-black uppercase transition ${
+                    zonaActiva === z ? 'bg-amber-500 text-slate-950 shadow-md' : 'bg-slate-900 text-slate-400'
                   }`}
                 >
                   {z}
@@ -577,149 +637,46 @@ export default function PdaView() {
               ))}
             </div>
 
-            <div className="grid grid-cols-4 gap-2 max-h-[60vh] overflow-y-auto">
+            {/* GRILLA DE MESAS MOSTRANDO OCUPACIÓN REAL */}
+            <div className="grid grid-cols-4 gap-2 max-h-[65vh] overflow-y-auto p-1">
               {opcionesMesas.map((n) => {
+                const clave = `${zonaActiva}-${n}`
+                const mesaInfo = mesasOcupadasMap[clave]
+                const estaOcupada = Boolean(mesaInfo)
                 const esSeleccionada = mesaNum === n
                 const nombreVisual = obtenerNombreMesa(n)
+
                 return (
-                  <div
+                  <button
                     key={n}
                     onClick={() => {
                       setMesaNum(n)
                       setModalMesaAbierto(false)
                     }}
-                    className={`p-3 rounded-2xl border text-center relative flex flex-col justify-center items-center h-20 ${
+                    className={`p-2 rounded-2xl border text-center flex flex-col justify-between items-center h-20 transition active:scale-95 ${
                       esSeleccionada
-                        ? 'bg-amber-500 border-amber-400 text-slate-950 font-black'
-                        : 'bg-slate-900 border-slate-800 text-slate-300 font-bold'
+                        ? 'ring-2 ring-amber-400 bg-amber-500 text-slate-950 font-black'
+                        : estaOcupada
+                        ? 'bg-rose-950/80 border-rose-600/80 text-rose-200'
+                        : 'bg-emerald-950/40 border-emerald-600/40 text-emerald-300'
                     }`}
                   >
-                    <span className="text-xs uppercase leading-tight line-clamp-2">{nombreVisual}</span>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        </div>
-      )}
+                    <span className="text-[11px] font-black uppercase leading-tight line-clamp-1">
+                      {nombreVisual}
+                    </span>
 
-      {/* MODAL STOCK */}
-      {modalStockAbierto && (
-        <div className="fixed inset-0 bg-slate-950/90 z-50 p-4 flex flex-col justify-between">
-          <div>
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="font-black text-amber-500 text-sm uppercase">📦 Reportar Faltas / Stock</h2>
-              <button
-                onClick={() => setModalStockAbierto(false)}
-                className="w-8 h-8 bg-slate-800 text-slate-300 font-bold rounded-full"
-              >
-                ✕
-              </button>
-            </div>
+                    <span className="text-[10px] font-extrabold">
+                      {estaOcupada ? `${mesaInfo.total.toFixed(2)}€` : 'Libre'}
+                    </span>
 
-            <div className="grid grid-cols-2 gap-2 mb-4 max-h-[40vh] overflow-y-auto">
-              {productos.map((p) => {
-                const marcado = listaFaltas.includes(p.nombre)
-                return (
-                  <button
-                    key={p.id}
-                    onClick={() => {
-                      if (marcado) setListaFaltas(listaFaltas.filter((i) => i !== p.nombre))
-                      else setListaFaltas([...listaFaltas, p.nombre])
-                    }}
-                    className={`p-2.5 rounded-xl border text-left text-xs font-bold transition ${
-                      marcado
-                        ? 'bg-rose-500/20 border-rose-500 text-rose-300'
-                        : 'bg-slate-900 border-slate-800 text-slate-300'
-                    }`}
-                  >
-                    {marcado ? '❌ ' : '✔️ '} {p.nombre}
-                  </button>
-                )
-              })}
-            </div>
-
-            <div className="flex gap-2 mb-4">
-              <input
-                type="text"
-                placeholder="Otra falta manual"
-                value={faltaTextoManual}
-                onChange={(e) => setFaltaTextoManual(e.target.value)}
-                className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100"
-              />
-              <button
-                onClick={() => {
-                  if (faltaTextoManual.trim()) {
-                    setListaFaltas([...listaFaltas, faltaTextoManual.trim()])
-                    setFaltaTextoManual('')
-                  }
-                }}
-                className="bg-slate-800 px-3 py-2 rounded-xl text-xs font-bold"
-              >
-                +
-              </button>
-            </div>
-          </div>
-
-          <button
-            onClick={() => {
-              if (listaFaltas.length === 0) return
-              alert(`📩 Aviso enviado a los jefes:\nFaltas acumuladas:\n- ${listaFaltas.join('\n- ')}`)
-              setListaFaltas([])
-              setModalStockAbierto(false)
-            }}
-            disabled={listaFaltas.length === 0}
-            className="w-full py-3.5 bg-rose-600 disabled:opacity-30 text-white font-black text-xs uppercase rounded-xl shadow-lg"
-          >
-            📩 ENVIAR AVISO A JEFES ({listaFaltas.length})
-          </button>
-        </div>
-      )}
-
-      {/* MODAL TURNOS */}
-      {modalTurnosAbierto && (
-        <div className="fixed inset-0 bg-slate-950/90 z-50 p-4 flex flex-col justify-between">
-          <div>
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="font-black text-amber-500 text-sm uppercase">📅 Turnos de Trabajo</h2>
-              <button
-                onClick={() => setModalTurnosAbierto(false)}
-                className="w-8 h-8 bg-slate-800 text-slate-300 font-bold rounded-full"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="space-y-3 max-h-[70vh] overflow-y-auto">
-              {Object.keys(turnos).map((t) => {
-                const apuntados = turnos[t] || []
-                const yoApuntado = apuntados.includes(usuario?.nombre)
-
-                return (
-                  <div key={t} className="bg-slate-900 border border-slate-800 p-3 rounded-2xl flex justify-between items-center">
-                    <div>
-                      <h3 className="font-black text-xs text-slate-200">{t}</h3>
-                      <p className="text-[10px] text-slate-500">
-                        {apuntados.length > 0 ? `Apuntados: ${apuntados.join(', ')}` : 'Nadie apuntado'}
-                      </p>
-                    </div>
-
-                    <button
-                      onClick={() => {
-                        const lista = turnos[t] || []
-                        const existe = lista.includes(usuario.nombre)
-                        const nueva = existe ? lista.filter((n) => n !== usuario.nombre) : [...lista, usuario.nombre]
-                        setTurnos({ ...turnos, [t]: nueva })
-                      }}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase transition ${
-                        yoApuntado
-                          ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40'
-                          : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                    <span
+                      className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-md ${
+                        estaOcupada ? 'bg-rose-600 text-white' : 'bg-emerald-600/40 text-emerald-200'
                       }`}
                     >
-                      {yoApuntado ? 'Desapuntarme' : 'Apuntarme'}
-                    </button>
-                  </div>
+                      {estaOcupada ? 'Ocupada' : 'Disponible'}
+                    </span>
+                  </button>
                 )
               })}
             </div>
