@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 
 export default function PdaView() {
@@ -53,12 +53,98 @@ export default function PdaView() {
     cargarMesasOcupadas()
   }, [])
 
+  const cargarMesasOcupadas = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('pedidos')
+        .select(`
+          id,
+          mesa_id,
+          mesas ( zona, numero ),
+          lineas_pedido ( precio, cantidad )
+        `)
+        .eq('estado', 'abierto')
+
+      if (error || !data) return
+
+      const ocupadas = {}
+      data.forEach((p) => {
+        if (p.mesas) {
+          const clave = `${p.mesas.zona}-${p.mesas.numero}`
+          const totalMesa = p.lineas_pedido?.reduce((sum, l) => sum + Number(l.precio) * l.cantidad, 0) || 0
+          if (totalMesa > 0 && p.lineas_pedido && p.lineas_pedido.length > 0) {
+            ocupadas[clave] = { pedidoId: p.id, total: totalMesa }
+          }
+        }
+      })
+      setMesasOcupadasMap(ocupadas)
+    } catch (e) {
+      console.error('Error leyendo ocupación:', e)
+    }
+  }, [])
+
+  const cargarPedidoMesaActual = useCallback(async () => {
+    try {
+      const { data: mesa } = await supabase
+        .from('mesas')
+        .select('id')
+        .eq('zona', zonaActiva)
+        .eq('numero', Number(mesaNum))
+        .maybeSingle()
+
+      if (!mesa) {
+        setComandaActual([])
+        setPedidoIdActual(null)
+        setAliasActual('')
+        return
+      }
+
+      const { data: pedido } = await supabase
+        .from('pedidos')
+        .select('id, nota')
+        .eq('mesa_id', mesa.id)
+        .eq('estado', 'abierto')
+        .maybeSingle()
+
+      if (!pedido) {
+        setComandaActual([])
+        setPedidoIdActual(null)
+        setAliasActual('')
+        return
+      }
+
+      setPedidoIdActual(pedido.id)
+      setAliasActual(pedido.nota || '')
+
+      const { data: lineas } = await supabase
+        .from('lineas_pedido')
+        .select('*')
+        .eq('pedido_id', pedido.id)
+        .order('id', { ascending: true })
+
+      if (lineas) {
+        setComandaActual(
+          lineas.map((l) => ({
+            id_linea: l.id,
+            nombre: l.producto_nombre || l.nombre,
+            precio: Number(l.precio),
+            cantidad: l.cantidad,
+            destino: l.destino || 'barra',
+            estado: l.estado,
+          }))
+        )
+      }
+    } catch (err) {
+      console.error('Error cargando comanda actual:', err)
+    }
+  }, [zonaActiva, mesaNum])
+
   // 3. Cargar Pedido al cambiar de Mesa/Zona
   useEffect(() => {
     cargarPedidoMesaActual()
-  }, [zonaActiva, mesaNum])
+  }, [cargarPedidoMesaActual])
 
-  // 4. Suscripción en Tiempo Real
+  // 4. Suscripción en Tiempo Real Global (Sin recrear canal en cada cambio de mesa)
   useEffect(() => {
     const channelGlobal = supabase
       .channel('pda-tpv-sync-channel')
@@ -75,7 +161,7 @@ export default function PdaView() {
     return () => {
       supabase.removeChannel(channelGlobal)
     }
-  }, [zonaActiva, mesaNum])
+  }, [cargarMesasOcupadas, cargarPedidoMesaActual])
 
   // LOGIN Y LOGOUT
   const handleLogin = async (e) => {
@@ -160,98 +246,12 @@ export default function PdaView() {
     }
   }
 
-  const cargarMesasOcupadas = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('pedidos')
-        .select(`
-          id,
-          mesa_id,
-          mesas ( zona, numero ),
-          lineas_pedido ( precio, cantidad )
-        `)
-        .eq('estado', 'abierto')
-
-      if (error || !data) return
-
-      const ocupadas = {}
-      data.forEach((p) => {
-        if (p.mesas) {
-          const clave = `${p.mesas.zona}-${p.mesas.numero}`
-          const totalMesa = p.lineas_pedido?.reduce((sum, l) => sum + Number(l.precio) * l.cantidad, 0) || 0
-          if (totalMesa > 0 && p.lineas_pedido && p.lineas_pedido.length > 0) {
-            ocupadas[clave] = { pedidoId: p.id, total: totalMesa }
-          }
-        }
-      })
-      setMesasOcupadasMap(ocupadas)
-    } catch (e) {
-      console.error('Error leyendo ocupación:', e)
-    }
-  }
-
-  const cargarPedidoMesaActual = async () => {
-    try {
-      const { data: mesa } = await supabase
-        .from('mesas')
-        .select('id')
-        .eq('zona', zonaActiva)
-        .eq('numero', Number(mesaNum))
-        .maybeSingle()
-
-      if (!mesa) {
-        setComandaActual([])
-        setPedidoIdActual(null)
-        setAliasActual('')
-        return
-      }
-
-      const { data: pedido } = await supabase
-        .from('pedidos')
-        .select('id, nota')
-        .eq('mesa_id', mesa.id)
-        .eq('estado', 'abierto')
-        .maybeSingle()
-
-      if (!pedido) {
-        setComandaActual([])
-        setPedidoIdActual(null)
-        setAliasActual('')
-        return
-      }
-
-      setPedidoIdActual(pedido.id)
-      setAliasActual(pedido.nota || '')
-
-      const { data: lineas } = await supabase
-        .from('lineas_pedido')
-        .select('*')
-        .eq('pedido_id', pedido.id)
-        .order('id', { ascending: true })
-
-      if (lineas) {
-        setComandaActual(
-          lineas.map((l) => ({
-            id_linea: l.id,
-            nombre: l.producto_nombre || l.nombre,
-            precio: Number(l.precio),
-            cantidad: l.cantidad,
-            destino: l.destino || 'barra',
-            estado: l.estado,
-          }))
-        )
-      }
-    } catch (err) {
-      console.error('Error cargando comanda actual:', err)
-    }
-  }
-
   const obtenerNombreMesa = (num, zona = zonaActiva) => {
     const clave = `${zona}-${num}`
     return nombresMesas[clave] || `Mesa ${num}`
   }
 
-  // --- AGREGAR PRODUCTO (CON RESPUESTA INSTANTÁNEA EN MÓVIL) ---
+  // --- AGREGAR PRODUCTO ---
   const agregarAlTicket = async (prod) => {
     if (!prod) return
 
@@ -320,7 +320,6 @@ export default function PdaView() {
         if (errInsert) throw errInsert
       }
 
-      // Refrescar al instante la interfaz local y la ocupación de mesas
       await cargarPedidoMesaActual()
       await cargarMesasOcupadas()
     } catch (err) {
@@ -338,6 +337,12 @@ export default function PdaView() {
     }
     await cargarPedidoMesaActual()
     await cargarMesasOcupadas()
+  }
+
+  const guardarAliasBD = async () => {
+    if (pedidoIdActual && aliasActual) {
+      await supabase.from('pedidos').update({ nota: aliasActual }).eq('id', pedidoIdActual)
+    }
   }
 
   const liberarMesa = async (pedidoId, e) => {
@@ -497,13 +502,8 @@ export default function PdaView() {
             type="text"
             placeholder="Nombre o nota (ej: Gorra roja)"
             value={aliasActual}
-            onChange={async (e) => {
-              const val = e.target.value
-              setAliasActual(val)
-              if (pedidoIdActual) {
-                await supabase.from('pedidos').update({ nota: val }).eq('id', pedidoIdActual)
-              }
-            }}
+            onChange={(e) => setAliasActual(e.target.value)}
+            onBlur={guardarAliasBD}
             className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-xs font-semibold text-amber-300 placeholder-slate-600 focus:outline-none focus:border-amber-500/50"
           />
         </div>
@@ -526,7 +526,7 @@ export default function PdaView() {
           ))}
         </div>
 
-        {/* REJILLA DE PRODUCTOS CON SOPORTE TÁCTIL DIRECTO */}
+        {/* REJILLA DE PRODUCTOS CON OPTIMIZACIÓN TÁCTIL */}
         <div className="p-2.5 flex-1 overflow-y-auto">
           {cargandoProductos ? (
             <div className="flex flex-col items-center justify-center h-48 text-slate-500 text-xs">
@@ -545,13 +545,10 @@ export default function PdaView() {
                 const precioProd = Number(p.precio || 0).toFixed(2)
 
                 return (
-                  <div
+                  <button
                     key={p.id}
+                    type="button"
                     onClick={() => agregarAlTicket(p)}
-                    onTouchEnd={(e) => {
-                      e.preventDefault()
-                      agregarAlTicket(p)
-                    }}
                     className="bg-slate-900 hover:bg-slate-800 border border-slate-800 active:border-amber-500 p-3 rounded-2xl flex flex-col justify-between h-24 text-left active:scale-95 transition cursor-pointer select-none touch-manipulation"
                   >
                     <div className="flex justify-between items-start w-full pointer-events-none">
@@ -566,7 +563,7 @@ export default function PdaView() {
                       </span>
                       <span className="font-black text-xs text-amber-400">{precioProd}€</span>
                     </div>
-                  </div>
+                  </button>
                 )
               })}
             </div>
