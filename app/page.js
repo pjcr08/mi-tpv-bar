@@ -249,7 +249,7 @@ export default function Page() {
       }
 
       setMultiplicador('1')
-      alert('🚀 Comanda enviada')
+      alert('✨ Comanda enviada a cocina/barra')
       await cargarComandasServidor()
     } catch (err) {
       console.error(err)
@@ -278,7 +278,7 @@ export default function Page() {
       })
 
       setMultiplicador('1')
-      alert('💳 Cobro realizado')
+      alert('💳 Transacción completada')
       cargarComandasServidor()
     } catch (e) {
       console.error(e)
@@ -293,135 +293,167 @@ export default function Page() {
         @media print {
           body * { visibility: hidden; }
           #ticket-print, #ticket-print * { visibility: visible; }
-          #ticket-print { position: absolute; left: 0; top: 0; width: 80mm; font-family: monospace; }
+          #ticket-print { position: absolute; left: 0; top: 0; width: 80mm; font-family: 'Courier New', monospace; font-size: 11px; }
           .no-imprimir { display: none !important; }
         }
       `}</style>
 
-      <div className="h-screen w-screen bg-slate-200 text-slate-800 flex flex-col font-sans select-none overflow-hidden no-imprimir text-xs">
+      <div className="h-screen w-screen bg-[#0f1115] text-stone-200 flex flex-col font-sans select-none overflow-hidden no-imprimir antialiased">
         
+        {/* BARRA SUPERIOR ELEGANTE */}
+        <header className="h-14 bg-[#161920] border-b border-amber-500/20 px-6 flex justify-between items-center shadow-2xl">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 font-serif font-bold text-lg">
+              J
+            </div>
+            <div>
+              <h1 className="font-serif tracking-widest text-sm font-semibold text-amber-200 uppercase">
+                Jorco Fusión
+              </h1>
+              <p className="text-[10px] text-stone-400 tracking-wider uppercase">Gourmet & Cocktail Bar</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 bg-[#0f1115] px-3 py-1.5 rounded-lg border border-stone-800">
+              <span className="text-[10px] uppercase font-bold text-stone-400 tracking-wider">Mesa Activa</span>
+              <span className="text-xs font-semibold text-amber-400">{zonaActiva} — Mesa {mesaNum}</span>
+            </div>
+          </div>
+        </header>
+
         {/* PANEL PRINCIPAL */}
-        <div className="flex-1 flex overflow-hidden p-1 gap-1">
+        <div className="flex-1 flex overflow-hidden p-3 gap-3">
           
-          {/* COLUMNA IZQUIERDA: TICKET Y CONTROL */}
-          <div className="w-5/12 flex flex-col gap-1 bg-emerald-800/10 p-1 rounded border border-emerald-700/30">
+          {/* COLUMNA IZQUIERDA: TICKET Y COBRO */}
+          <div className="w-[38%] flex flex-col gap-3 bg-[#161920] p-3 rounded-xl border border-stone-800/80 shadow-2xl">
             
-            {/* BOTONES SUPERIORES MESA / CLIENTE */}
-            <div className="grid grid-cols-4 gap-1">
-              <button className="bg-emerald-700 text-white font-bold py-1.5 rounded text-[11px] hover:bg-emerald-800 flex flex-col items-center">
-                <span>👤</span>
-                <span>Asignar cliente</span>
-              </button>
-              <div className="bg-white border border-slate-300 rounded p-1 flex flex-col gap-0.5 text-[10px]">
-                <input
-                  type="text"
-                  placeholder="Alias Cliente"
-                  value={notaActual}
-                  onChange={(e) => handleNotaChange(e.target.value)}
-                  className="w-full bg-slate-100 px-1 py-0.5 border rounded focus:outline-none"
-                />
-                <div className="flex justify-between font-bold text-emerald-800">
-                  <span>Mesa: {mesaNum}</span>
-                  <span>{zonaActiva}</span>
+            {/* CABECERA TICKET Y CLIENTE */}
+            <div className="flex items-center gap-2 bg-[#0f1115] p-2 rounded-lg border border-stone-800">
+              <span className="text-amber-500/70 pl-1 text-sm">👤</span>
+              <input
+                type="text"
+                placeholder="Nombre / Alias del cliente..."
+                value={notaActual}
+                onChange={(e) => handleNotaChange(e.target.value)}
+                className="w-full bg-transparent text-xs text-stone-200 placeholder-stone-600 focus:outline-none font-medium"
+              />
+            </div>
+
+            {/* LISTADO DE CONSUMICIONES */}
+            <div className="flex-1 bg-[#0f1115] border border-stone-800/80 rounded-lg p-3 overflow-y-auto flex flex-col justify-between">
+              <div>
+                <div className="grid grid-cols-12 pb-2 border-b border-stone-800 text-[10px] font-bold uppercase tracking-widest text-stone-500">
+                  <span className="col-span-6">Artículo</span>
+                  <span className="col-span-3 text-center">Cant.</span>
+                  <span className="col-span-3 text-right">Importe</span>
                 </div>
-              </div>
-              <button className="bg-emerald-700 text-white font-bold py-1.5 rounded text-[11px] hover:bg-emerald-800 flex flex-col items-center">
-                <span>👥</span>
-                <span>Comensales</span>
-              </button>
-              <button onClick={enviarComanda} className="bg-emerald-600 text-white font-bold py-1.5 rounded text-[11px] hover:bg-emerald-700 flex flex-col items-center">
-                <span>📌</span>
-                <span>Aparcar</span>
-              </button>
-            </div>
 
-            {/* TABLA TICKET */}
-            <div className="flex-1 bg-white border border-slate-300 rounded overflow-y-auto flex flex-col justify-between">
-              <table className="w-full text-left border-collapse">
-                <thead className="bg-emerald-800 text-white text-[10px] uppercase sticky top-0">
-                  <tr>
-                    <th className="p-1">Artículo</th>
-                    <th className="p-1 text-center">Dto.</th>
-                    <th className="p-1 text-center">Uds.</th>
-                    <th className="p-1 text-right">Imp.</th>
-                    <th className="p-1 text-right">Total</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200 font-bold">
-                  {ticketActual.map((item) => (
-                    <tr key={item.id} className="hover:bg-amber-50">
-                      <td className="p-1 truncate max-w-[100px]">{item.nombre}</td>
-                      <td className="p-1 text-center text-slate-400">0%</td>
-                      <td className="p-1 text-center">
-                        <div className="inline-flex items-center gap-1">
-                          <button onClick={() => cambiarCantidadItem(item.id, -1)} className="px-1 bg-slate-200 rounded">-</button>
-                          <span>{item.cantidad}</span>
-                          <button onClick={() => cambiarCantidadItem(item.id, 1)} className="px-1 bg-slate-200 rounded">+</button>
+                {ticketActual.length === 0 ? (
+                  <div className="text-center text-stone-600 my-20 font-serif italic text-xs">
+                    Sin artículos seleccionados
+                  </div>
+                ) : (
+                  <div className="divide-y divide-stone-900/60 mt-1">
+                    {ticketActual.map((item) => (
+                      <div key={item.id} className="grid grid-cols-12 py-2.5 items-center text-xs">
+                        <span className="col-span-6 font-medium text-stone-200 truncate pr-1">
+                          {item.nombre}
+                        </span>
+                        
+                        <div className="col-span-3 flex items-center justify-center gap-1.5">
+                          <button
+                            onClick={() => cambiarCantidadItem(item.id, -1)}
+                            className="w-5 h-5 rounded bg-stone-800 hover:bg-stone-700 text-stone-300 flex items-center justify-center text-xs transition"
+                          >
+                            -
+                          </button>
+                          <span className="font-bold text-amber-400 text-xs w-4 text-center">
+                            {item.cantidad}
+                          </span>
+                          <button
+                            onClick={() => cambiarCantidadItem(item.id, 1)}
+                            className="w-5 h-5 rounded bg-stone-800 hover:bg-stone-700 text-stone-300 flex items-center justify-center text-xs transition"
+                          >
+                            +
+                          </button>
                         </div>
-                      </td>
-                      <td className="p-1 text-right">{Number(item.precio).toFixed(2)}</td>
-                      <td className="p-1 text-right text-emerald-700">{(item.precio * item.cantidad).toFixed(2)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
 
-              {/* BARRA DE TOTALES */}
-              <div className="bg-slate-100 border-t border-slate-300 p-1 flex justify-between items-center font-black">
-                <span className="text-slate-600">ARTÍCULOS: {ticketActual.reduce((acc, i) => acc + i.cantidad, 0)}</span>
-                <span className="text-base text-emerald-800">TOTAL: {calcularTotal().toFixed(2)} €</span>
+                        <span className="col-span-3 text-right font-serif font-semibold text-stone-300">
+                          {(item.precio * item.cantidad).toFixed(2)} €
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* TOTAL MESA */}
+              <div className="bg-[#161920] border border-stone-800 rounded-lg p-3 mt-2 flex justify-between items-center">
+                <span className="text-xs uppercase font-semibold tracking-wider text-stone-400">Total</span>
+                <span className="font-serif text-xl font-bold text-amber-400">
+                  {calcularTotal().toFixed(2)} €
+                </span>
               </div>
             </div>
 
-            {/* BOTONERA ACCIONES Y TECLADO */}
-            <div className="flex gap-1">
-              {/* BOTONES ACCION LATERAL */}
-              <div className="w-1/2 grid grid-cols-2 gap-1 text-[10px]">
-                <button className="bg-emerald-700 text-white p-1 rounded font-bold hover:bg-emerald-800">Cons. propio</button>
-                <button onClick={() => setTicketsPorMesa((prev) => ({ ...prev, [claveMesaActual]: [] }))} className="bg-rose-600 text-white p-1 rounded font-bold hover:bg-rose-700">Borrar cuenta</button>
-                <button className="bg-emerald-700 text-white p-1 rounded font-bold hover:bg-emerald-800">Dividir pagos</button>
-                <button className="bg-emerald-700 text-white p-1 rounded font-bold hover:bg-emerald-800">Camarero</button>
-                <button onClick={cobrarEImprimir} className="bg-emerald-700 text-white p-1 rounded font-bold hover:bg-emerald-800">Último doc.</button>
-                <button onClick={() => window.print()} className="bg-emerald-700 text-white p-1 rounded font-bold hover:bg-emerald-800">Proforma</button>
-              </div>
-
-              {/* KEYPAD */}
-              <div className="w-1/2 grid grid-cols-3 gap-1 bg-slate-300 p-1 rounded">
-                {[1, 2, 3, 4, 5, 6, 7, 8, 9, '*', 0, 'C'].map((n) => (
+            {/* TECLADO Y BOTONERA DE COMANDAS */}
+            <div className="grid grid-cols-12 gap-2">
+              {/* KEYPAD NUMÉRICO */}
+              <div className="col-span-7 grid grid-cols-3 gap-1 bg-[#0f1115] p-1.5 rounded-lg border border-stone-800">
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 'C', 0, `${multiplicador}x`].map((val, idx) => (
                   <button
-                    key={n}
-                    onClick={() => presionarTeclado(n)}
-                    className="bg-white border border-slate-400 font-black py-1 rounded text-sm hover:bg-slate-100 active:bg-slate-200"
+                    key={idx}
+                    onClick={() => typeof val === 'number' || val === 'C' ? presionarTeclado(val) : null}
+                    className={`py-2 rounded text-xs font-semibold transition active:scale-95 ${
+                      val === 'C'
+                        ? 'bg-rose-950/40 text-rose-300 hover:bg-rose-900/50'
+                        : String(val).includes('x')
+                        ? 'bg-amber-500/10 text-amber-400 font-bold border border-amber-500/20'
+                        : 'bg-[#161920] text-stone-300 hover:bg-stone-800 border border-stone-800/60'
+                    }`}
                   >
-                    {n}
+                    {val}
                   </button>
                 ))}
               </div>
 
-              {/* BOTÓN COBRAR */}
-              <button
-                onClick={cobrarEImprimir}
-                className="w-16 bg-orange-500 hover:bg-orange-600 text-white font-black rounded flex flex-col items-center justify-center text-sm shadow uppercase"
-              >
-                <span>Cobrar</span>
-              </button>
+              {/* ACCIONES RÁPIDAS */}
+              <div className="col-span-5 flex flex-col gap-1.5">
+                <button
+                  onClick={enviarComanda}
+                  disabled={ticketActual.length === 0}
+                  className="flex-1 bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/30 text-amber-300 font-medium text-xs rounded-lg transition active:scale-95 disabled:opacity-30 flex items-center justify-center gap-1.5 uppercase tracking-wider"
+                >
+                  <span>📌</span> Enviar
+                </button>
+                <button
+                  onClick={cobrarEImprimir}
+                  disabled={ticketActual.length === 0}
+                  className="flex-1 bg-amber-500 hover:bg-amber-400 text-stone-950 font-semibold text-xs rounded-lg shadow-lg shadow-amber-500/10 transition active:scale-95 disabled:opacity-30 flex items-center justify-center gap-1.5 uppercase tracking-wider"
+                >
+                  <span>💳</span> Cobrar
+                </button>
+              </div>
             </div>
           </div>
 
-          {/* COLUMNA DERECHA: PRODUCTOS, FAMILIAS Y ZONAS */}
-          <div className="w-7/12 flex gap-1">
+          {/* COLUMNA DERECHA: SELECCIÓN DE PRODUCTOS Y MESA */}
+          <div className="w-[62%] flex gap-3">
             
-            {/* PANEL FAMILIAS Y PRODUCTOS */}
-            <div className="flex-1 flex flex-col gap-1">
+            {/* CATÁLOGO DE PRODUCTOS */}
+            <div className="flex-1 flex flex-col gap-3">
               
-              {/* FAMILIAS (ARRIBA) */}
-              <div className="grid grid-cols-6 gap-1 bg-slate-300 p-1 rounded max-h-28 overflow-y-auto">
+              {/* CATEGORÍAS (FAMILIAS) */}
+              <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
                 {familias.map((f) => (
                   <button
                     key={f}
                     onClick={() => setFamiliaActiva(f)}
-                    className={`p-1 font-bold text-[10px] rounded border uppercase truncate ${
-                      familiaActiva === f ? 'bg-emerald-700 text-white border-emerald-800' : 'bg-white text-slate-800 border-slate-300 hover:bg-slate-100'
+                    className={`px-4 py-2.5 rounded-lg text-xs font-semibold tracking-wider uppercase transition whitespace-nowrap border ${
+                      familiaActiva === f
+                        ? 'bg-amber-500 text-stone-950 border-amber-400 shadow-md shadow-amber-500/10'
+                        : 'bg-[#161920] text-stone-400 border-stone-800 hover:text-stone-200 hover:bg-stone-800/50'
                     }`}
                   >
                     {f}
@@ -429,84 +461,105 @@ export default function Page() {
                 ))}
               </div>
 
-              {/* GRID PRODUCTOS */}
-              <div className="flex-1 grid grid-cols-4 gap-1 bg-slate-100 border border-slate-300 p-1 rounded overflow-y-auto">
+              {/* GRID DE PRODUCTOS */}
+              <div className="flex-1 grid grid-cols-3 gap-2.5 bg-[#161920] p-3 rounded-xl border border-stone-800/80 overflow-y-auto">
                 {productosFiltrados.map((p) => (
                   <button
                     key={p.id}
                     onClick={() => agregarAlTicket(p)}
-                    className="bg-white border border-slate-300 hover:border-emerald-600 rounded p-1 flex flex-col justify-between items-center h-16 shadow-sm active:scale-95 transition"
+                    className="bg-[#0f1115] hover:bg-stone-900 border border-stone-800/80 hover:border-amber-500/40 rounded-xl p-3 flex flex-col justify-between h-24 transition active:scale-95 text-left group shadow-sm"
                   >
-                    <span className="font-extrabold text-[11px] text-slate-800 uppercase line-clamp-2 text-center">
+                    <span className="font-medium text-xs text-stone-200 line-clamp-2 leading-snug group-hover:text-amber-200 transition">
                       {p.nombre}
                     </span>
-                    <span className="font-black text-emerald-700 text-xs">
-                      {Number(p.precio).toFixed(2)} €
-                    </span>
+                    <div className="flex justify-between items-end border-t border-stone-900 pt-2 w-full">
+                      <span className="text-[9px] uppercase tracking-wider text-stone-500 font-bold">
+                        {p.destino || 'Barra'}
+                      </span>
+                      <span className="font-serif font-bold text-sm text-amber-400">
+                        {Number(p.precio).toFixed(2)} €
+                      </span>
+                    </div>
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* BARRA DE ZONAS Y MESAS (DERECHA) */}
-            <div className="w-24 bg-slate-300 p-1 rounded flex flex-col gap-1">
-              <div className="bg-emerald-800 text-white font-bold text-center py-1 rounded text-[10px] uppercase">
+            {/* BARRA DE ZONAS Y MESAS */}
+            <div className="w-28 bg-[#161920] p-2 rounded-xl border border-stone-800/80 flex flex-col gap-2">
+              <span className="text-[9px] uppercase font-bold text-stone-500 tracking-widest text-center">
                 Zonas
-              </div>
-              {['Barra', 'Salón', 'Terraza'].map((z) => (
-                <button
-                  key={z}
-                  onClick={() => setZonaActiva(z)}
-                  className={`py-2 px-1 font-bold rounded border text-[10px] uppercase ${
-                    zonaActiva === z ? 'bg-emerald-700 text-white' : 'bg-white text-slate-800 hover:bg-slate-100'
-                  }`}
-                >
-                  {z}
-                </button>
-              ))}
-
-              <div className="mt-2 bg-emerald-800 text-white font-bold text-center py-1 rounded text-[10px] uppercase">
-                Mesa
-              </div>
-              <div className="flex-1 grid grid-cols-1 gap-1 overflow-y-auto">
-                {[1, 2, 3, 4, 5, 6, 7, 8].map((m) => (
+              </span>
+              <div className="flex flex-col gap-1">
+                {['Terraza', 'Salón', 'Barra'].map((z) => (
                   <button
-                    key={m}
-                    onClick={() => setMesaNum(m)}
-                    className={`py-1.5 font-black rounded border text-[11px] ${
-                      mesaNum === m ? 'bg-amber-500 text-white border-amber-600' : 'bg-white text-slate-800 hover:bg-slate-100'
+                    key={z}
+                    onClick={() => {
+                      setZonaActiva(z)
+                      setMesaNum(1)
+                    }}
+                    className={`py-2 rounded-lg text-[10px] font-semibold uppercase tracking-wider border transition ${
+                      zonaActiva === z
+                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                        : 'bg-[#0f1115] text-stone-400 border-stone-800 hover:text-stone-200'
                     }`}
                   >
-                    Mesa {m}
+                    {z}
                   </button>
                 ))}
+              </div>
+
+              <span className="text-[9px] uppercase font-bold text-stone-500 tracking-widest text-center mt-2">
+                Mesas
+              </span>
+              <div className="flex-1 grid grid-cols-1 gap-1.5 overflow-y-auto">
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((m) => {
+                  const clave = `${zonaActiva}-${m}`
+                  const tieneItems = ticketsPorMesa[clave] && ticketsPorMesa[clave].length > 0
+                  return (
+                    <button
+                      key={m}
+                      onClick={() => setMesaNum(m)}
+                      className={`py-2 rounded-lg text-xs font-semibold border transition flex items-center justify-between px-3 ${
+                        mesaNum === m
+                          ? 'bg-amber-500 text-stone-950 border-amber-400 shadow-sm'
+                          : 'bg-[#0f1115] text-stone-300 border-stone-800 hover:bg-stone-900'
+                      }`}
+                    >
+                      <span>Mesa {m}</span>
+                      {tieneItems && (
+                        <span className={`w-1.5 h-1.5 rounded-full ${mesaNum === m ? 'bg-stone-950' : 'bg-amber-400'}`} />
+                      )}
+                    </button>
+                  )
+                })}
               </div>
             </div>
           </div>
         </div>
-
-        {/* PIE DE PÁGINA ESTADO */}
-        <footer className="bg-emerald-800 text-white px-2 py-0.5 flex justify-between text-[10px] font-bold">
-          <div>TPV ACTIVO | ZONA: {zonaActiva} | MESA: {mesaNum}</div>
-          <div>ESTADO: EN LÍNEA</div>
-        </footer>
       </div>
 
-      {/* PLANTILLA DE IMPRESIÓN */}
+      {/* PLANTILLA DE IMPRESIÓN SOBERBIA */}
       <div id="ticket-print">
-        <h2 style={{ textAlign: 'center', margin: 0 }}>JORCO FUSIÓN</h2>
-        <p style={{ textAlign: 'center' }}>TICKET DE COMPRA</p>
-        <p>Mesa: {mesaNum} ({zonaActiva})</p>
-        {notaActual && <p>Cliente: {notaActual}</p>}
-        <hr />
+        <div style={{ textAlign: 'center', marginBottom: '10px' }}>
+          <h2 style={{ margin: 0, fontSize: '14px', letterSpacing: '2px' }}>JORCO FUSIÓN</h2>
+          <p style={{ margin: 0, fontSize: '9px', textTransform: 'uppercase' }}>Gourmet Experience</p>
+        </div>
+        <p style={{ margin: '2px 0' }}><strong>Ubicación:</strong> {zonaActiva} — Mesa {mesaNum}</p>
+        {notaActual && <p style={{ margin: '2px 0' }}><strong>Cliente:</strong> {notaActual}</p>}
+        <hr style={{ borderStyle: 'dashed', margin: '8px 0' }} />
         {ticketActual.map((i) => (
-          <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between', margin: '3px 0' }}>
             <span>{i.cantidad}x {i.nombre}</span>
             <span>{(i.precio * i.cantidad).toFixed(2)}€</span>
           </div>
         ))}
-        <hr />
-        <h3 style={{ textAlign: 'right' }}>TOTAL: {calcularTotal().toFixed(2)}€</h3>
+        <hr style={{ borderStyle: 'dashed', margin: '8px 0' }} />
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', fontWeight: 'bold' }}>
+          <span>TOTAL</span>
+          <span>{calcularTotal().toFixed(2)}€</span>
+        </div>
+        <p style={{ textAlign: 'center', marginTop: '15px', fontSize: '9px' }}>Gracias por su visita</p>
       </div>
     </>
   )
