@@ -130,7 +130,7 @@ export default function PdaView() {
             precio: Number(l.precio),
             cantidad: l.cantidad,
             destino: l.destino || 'barra',
-            estado: l.estado,
+            estado: l.estado, // vendrá como 'pendiente', 'en_proceso', etc.
           }))
         )
       }
@@ -144,7 +144,7 @@ export default function PdaView() {
     cargarPedidoMesaActual()
   }, [cargarPedidoMesaActual])
 
-  // 4. Suscripción en Tiempo Real Global (Sin recrear canal en cada cambio de mesa)
+  // 4. Suscripción Realtime
   useEffect(() => {
     const channelGlobal = supabase
       .channel('pda-tpv-sync-channel')
@@ -202,7 +202,7 @@ export default function PdaView() {
     }
   }
 
-  // CARGA DE PRODUCTOS DE LA BASE DE DATOS
+  // CARGA DE PRODUCTOS
   const cargarProductos = async () => {
     setCargandoProductos(true)
     try {
@@ -251,13 +251,93 @@ export default function PdaView() {
     return nombresMesas[clave] || `Mesa ${num}`
   }
 
-  // --- AGREGAR PRODUCTO ---
-  const agregarAlTicket = async (prod) => {
+  // --- AGREGAR PRODUCTO (LOCAL RÁPIDO) ---
+  const agregarAlTicket = (prod) => {
     if (!prod) return
+
+    const nombreProd = prod.nombre || 'Producto'
+    const destinoProd = prod.destino || 'barra'
+    const precioProd = Number(prod.precio || 0)
+
+    const indexExistente = comandaActual.findIndex(
+      (i) => i.nombre === nombreProd && i.estado === 'borrador'
+    )
+
+    if (indexExistente >= 0) {
+      const nuevaComanda = [...comandaActual]
+      nuevaComanda[indexExistente].cantidad += 1
+      setComandaActual(nuevaComanda)
+    } else {
+      setComandaActual([
+        ...comandaActual,
+        {
+          id_linea: `temp-${Date.now()}-${Math.random()}`,
+          nombre: nombreProd,
+          precio: precioProd,
+          cantidad: 1,
+          destino: destinoProd,
+          estado: 'borrador',
+        },
+      ])
+    }
+  }
+
+  const cambiarCantidad = async (item, delta) => {
+    if (item.estado === 'borrador') {
+      const nuevaCant = item.cantidad + delta
+      if (nuevaCant <= 0) {
+        setComandaActual(comandaActual.filter((i) => i.id_linea !== item.id_linea))
+      } else {
+        setComandaActual(
+          comandaActual.map((i) =>
+            i.id_linea === item.id_linea ? { ...i, cantidad: nuevaCant } : i
+          )
+        )
+      }
+    } else {
+      const nuevaCant = item.cantidad + delta
+      if (nuevaCant <= 0) {
+        await supabase.from('lineas_pedido').delete().eq('id', item.id_linea)
+      } else {
+        await supabase.from('lineas_pedido').update({ cantidad: nuevaCant }).eq('id', item.id_linea)
+      }
+      await cargarPedidoMesaActual()
+      await cargarMesasOcupadas()
+    }
+  }
+
+  const guardarAliasBD = async () => {
+    if (pedidoIdActual && aliasActual) {
+      await supabase.from('pedidos').update({ nota: aliasActual }).eq('id', pedidoIdActual)
+    }
+  }
+
+  const liberarMesa = async (pedidoId, e) => {
+    if (e) e.stopPropagation()
+    if (!pedidoId) return
+    if (!confirm('¿Liberar esta mesa y cancelar su pedido actual?')) return
+
+    try {
+      await supabase.from('lineas_pedido').delete().eq('pedido_id', pedidoId)
+      await supabase.from('pedidos').update({ estado: 'cancelado' }).eq('id', pedidoId)
+      await cargarMesasOcupadas()
+      await cargarPedidoMesaActual()
+    } catch (err) {
+      console.error('Error liberando mesa:', err)
+    }
+  }
+
+  // --- ENVIAR COMANDA A BD (GUARDA COMO 'PENDIENTE') ---
+  const enviarComandaBD = async () => {
+    const borradores = comandaActual.filter((i) => i.estado === 'borrador')
+    if (borradores.length === 0) return
+
+    setEnviando(true)
 
     try {
       let pId = pedidoIdActual
 
+      // 1. Si no hay pedido abierto, crearlo
       if (!pId) {
         let { data: mesaBD } = await supabase
           .from('mesas')
@@ -288,104 +368,25 @@ export default function PdaView() {
         if (errPedido) throw errPedido
         pId = nuevoPedido.id
         setPedidoIdActual(pId)
+      } else if (aliasActual) {
+        await supabase.from('pedidos').update({ nota: aliasActual }).eq('id', pId)
       }
 
-      const nombreProd = prod.nombre || 'Producto'
-      const destinoProd = prod.destino || 'barra'
-      const precioProd = Number(prod.precio || 0)
+      // 2. Insertar borradores con estado 'pendiente'
+      const lineasAInsertar = borradores.map((b) => ({
+        pedido_id: pId,
+        producto_nombre: b.nombre,
+        precio: b.precio,
+        cantidad: b.cantidad,
+        destino: b.destino,
+        estado: 'pendiente', // 👈 VÁLIDO PARA TU RESTRICCIÓN BD
+      }))
 
-      const itemExistente = comandaActual.find(
-        (i) => i.nombre === nombreProd && i.estado === 'borrador'
-      )
-
-      if (itemExistente) {
-        const { error: errUpdate } = await supabase
-          .from('lineas_pedido')
-          .update({ cantidad: itemExistente.cantidad + 1 })
-          .eq('id', itemExistente.id_linea)
-
-        if (errUpdate) throw errUpdate
-      } else {
-        const { error: errInsert } = await supabase.from('lineas_pedido').insert([
-          {
-            pedido_id: pId,
-            producto_nombre: nombreProd,
-            precio: precioProd,
-            cantidad: 1,
-            destino: destinoProd,
-            estado: 'borrador',
-          },
-        ])
-
-        if (errInsert) throw errInsert
-      }
+      const { error: errInsert } = await supabase.from('lineas_pedido').insert(lineasAInsertar)
+      if (errInsert) throw errInsert
 
       await cargarPedidoMesaActual()
       await cargarMesasOcupadas()
-    } catch (err) {
-      console.error('Error al agregar al ticket:', err)
-      alert(`No se pudo añadir el producto: ${err.message || 'Error de base de datos'}`)
-    }
-  }
-
-  const cambiarCantidad = async (item, delta) => {
-    const nuevaCant = item.cantidad + delta
-    if (nuevaCant <= 0) {
-      await supabase.from('lineas_pedido').delete().eq('id', item.id_linea)
-    } else {
-      await supabase.from('lineas_pedido').update({ cantidad: nuevaCant }).eq('id', item.id_linea)
-    }
-    await cargarPedidoMesaActual()
-    await cargarMesasOcupadas()
-  }
-
-  const guardarAliasBD = async () => {
-    if (pedidoIdActual && aliasActual) {
-      await supabase.from('pedidos').update({ nota: aliasActual }).eq('id', pedidoIdActual)
-    }
-  }
-
-  const liberarMesa = async (pedidoId, e) => {
-    if (e) e.stopPropagation()
-    if (!pedidoId) return
-    if (!confirm('¿Liberar esta mesa y cancelar su pedido actual?')) return
-
-    try {
-      await supabase.from('lineas_pedido').delete().eq('pedido_id', pedidoId)
-      await supabase.from('pedidos').update({ estado: 'cancelado' }).eq('id', pedidoId)
-      await cargarMesasOcupadas()
-      await cargarPedidoMesaActual()
-    } catch (err) {
-      console.error('Error liberando mesa:', err)
-    }
-  }
-
-  // --- ENVIAR COMANDA A COCINA Y BARRA ---
-  const enviarComandaBD = async () => {
-    if (!pedidoIdActual) return
-
-    const borradores = comandaActual.filter((i) => i.estado === 'borrador')
-    if (borradores.length === 0) return
-
-    setEnviando(true)
-
-    try {
-      const { error } = await supabase
-        .from('lineas_pedido')
-        .update({ estado: 'pendiente' })
-        .eq('pedido_id', pedidoIdActual)
-        .eq('estado', 'borrador')
-
-      if (error) throw error
-
-      if (aliasActual) {
-        await supabase
-          .from('pedidos')
-          .update({ nota: aliasActual })
-          .eq('id', pedidoIdActual)
-      }
-
-      await cargarPedidoMesaActual()
       setVerComandaMobile(false)
     } catch (err) {
       alert(`❌ Error al enviar comanda: ${err.message}`)
@@ -405,7 +406,7 @@ export default function PdaView() {
 
   const opcionesMesas = Array.from({ length: 20 }, (_, i) => i + 1)
 
-  // --- VISTA FORMULARIO LOGIN ---
+  // --- LOGIN ---
   if (!usuario) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
@@ -456,7 +457,7 @@ export default function PdaView() {
     )
   }
 
-  // --- VISTA PRINCIPAL PDA ---
+  // --- VISTA PDA ---
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-start select-none">
       <div className="w-full max-w-md min-h-screen flex flex-col bg-slate-950 border-x border-slate-800/50 relative pb-20">
@@ -495,7 +496,7 @@ export default function PdaView() {
           </div>
         </header>
 
-        {/* ALIAS DE MESA / NOTA */}
+        {/* ALIAS DE MESA */}
         <div className="p-2 bg-slate-900/40 border-b border-slate-800/60 flex items-center gap-2 px-3">
           <span className="text-xs">👤</span>
           <input
@@ -508,7 +509,7 @@ export default function PdaView() {
           />
         </div>
 
-        {/* SELECTOR DE FAMILIAS */}
+        {/* FAMILIAS */}
         <div className="flex gap-2 p-2 overflow-x-auto bg-slate-950 border-b border-slate-800/80 no-scrollbar">
           {familias.map((f) => (
             <button
@@ -526,7 +527,7 @@ export default function PdaView() {
           ))}
         </div>
 
-        {/* REJILLA DE PRODUCTOS CON OPTIMIZACIÓN TÁCTIL */}
+        {/* PRODUCTOS */}
         <div className="p-2.5 flex-1 overflow-y-auto">
           {cargandoProductos ? (
             <div className="flex flex-col items-center justify-center h-48 text-slate-500 text-xs">
@@ -570,7 +571,7 @@ export default function PdaView() {
           )}
         </div>
 
-        {/* BARRA INFERIOR FIJA */}
+        {/* BARRA INFERIOR */}
         <div className="fixed bottom-0 max-w-md w-full p-2.5 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 flex items-center gap-2 z-30">
           <button
             type="button"
@@ -695,7 +696,7 @@ export default function PdaView() {
           </div>
         )}
 
-        {/* MODAL SELECTOR DE MESA */}
+        {/* MODAL MESA */}
         {modalMesaAbierto && (
           <div className="fixed inset-0 bg-slate-950/95 z-50 p-4 flex flex-col justify-between max-w-md mx-auto">
             <div>
@@ -710,7 +711,6 @@ export default function PdaView() {
                 </button>
               </div>
 
-              {/* ZONAS */}
               <div className="flex gap-1.5 mb-4">
                 {['Terraza', 'Salón', 'Barra'].map((z) => (
                   <button
@@ -726,7 +726,6 @@ export default function PdaView() {
                 ))}
               </div>
 
-              {/* REJILLA MESAS */}
               <div className="grid grid-cols-3 gap-2 max-h-[65vh] overflow-y-auto p-1">
                 {opcionesMesas.map((n) => {
                   const clave = `${zonaActiva}-${n}`
