@@ -71,7 +71,7 @@ export default function BarraPage() {
       setComandasAgrupadas(Object.values(grupos))
     } catch (err) {
       console.error('Error cargando comanda de barra:', err)
-    } fontally {
+    } finally {
       setCargando(false)
     }
   }
