@@ -26,8 +26,8 @@ export default function HomePrincipal() {
   const ticketActual = ticketsPorMesa[claveMesaActual] || []
   const notaActual = notasPorMesa[claveMesaActual] || ''
 
-  const obtenerNombreMesa = (num) => {
-    const clave = `${zonaActiva}-${num}`
+  const obtenerNombreMesa = (num, zona = zonaActiva) => {
+    const clave = `${zona}-${num}`
     return nombresMesas[clave] || `Mesa ${num}`
   }
 
@@ -38,7 +38,6 @@ export default function HomePrincipal() {
     cargarNombresMesas()
     cargarComandasServidor()
 
-    // ESCUCHA EN TIEMPO REAL (REALTIME DE SUPABASE)
     const channel = supabase
       .channel('tpv-realtime-home')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, () => {
@@ -87,7 +86,6 @@ export default function HomePrincipal() {
     }
   }
 
-  // Carga todas las comandas en estado "abierto" de la BD
   const cargarComandasServidor = async () => {
     try {
       const { data: pedidosBD } = await supabase
@@ -245,7 +243,7 @@ export default function HomePrincipal() {
       }
 
       setMultiplicador(1)
-      alert(`📝 Comanda enviada: ${zonaActiva} - ${nombreMesaActual}`)
+      alert(`🚀 Comanda enviada a cocina/barra: ${zonaActiva} - ${nombreMesaActual}`)
     } catch (err) {
       alert(`❌ Error al enviar comanda: ${err.message || 'Error de conexión'}`)
     }
@@ -258,7 +256,6 @@ export default function HomePrincipal() {
       window.print()
       const mesaId = await obtenerOCrearMesa()
 
-      // Guardar cobrado en BD
       const { data: pedido } = await supabase
         .from('pedidos')
         .insert([{ mesa_id: mesaId, estado: 'cobrado', nota: notaActual }])
@@ -278,7 +275,6 @@ export default function HomePrincipal() {
         await supabase.from('lineas_pedido').insert(lineas)
       }
 
-      // Marcar comandas abiertas como cobradas
       await supabase.from('pedidos').update({ estado: 'cobrado' }).eq('mesa_id', mesaId).eq('estado', 'abierto')
 
       const copiaTickets = { ...ticketsPorMesa }
@@ -290,7 +286,7 @@ export default function HomePrincipal() {
       setNotasPorMesa(copiaNotas)
 
       setMultiplicador(1)
-      alert('💳 Cobro registrado')
+      alert('💳 Cobro registrado con éxito')
     } catch (e) {
       console.error(e)
     }
@@ -331,14 +327,18 @@ export default function HomePrincipal() {
         }
       `}</style>
 
-      <div className="h-screen bg-slate-100 text-slate-800 flex flex-col no-imprimir select-none font-sans overflow-hidden">
+      <div className="h-screen bg-slate-950 text-slate-100 flex flex-col no-imprimir select-none font-sans overflow-hidden">
         
-        {/* ENCABEZADO */}
-        <header className="bg-amber-500 border-b border-amber-600 px-3 py-1.5 flex justify-between items-center text-slate-900 shadow">
-          <div className="flex items-center gap-3">
-            <h1 className="font-black text-xl tracking-wide uppercase">JORCO FUSIÓN TPV</h1>
-            
-            <div className="flex bg-amber-600/40 p-1 rounded-lg gap-1 border border-amber-700/30">
+        {/* ENCABEZADO TPV */}
+        <header className="bg-slate-900 border-b border-slate-800 px-4 py-2 flex justify-between items-center shadow-lg">
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <span className="text-xl">🍹</span>
+              <h1 className="font-black text-lg tracking-wider text-amber-500 uppercase">JORCO FUSIÓN</h1>
+            </div>
+
+            {/* SELECCIÓN DE ZONA */}
+            <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800 gap-1">
               {['Terraza', 'Salón', 'Barra'].map((z) => (
                 <button
                   key={z}
@@ -346,10 +346,10 @@ export default function HomePrincipal() {
                     setZonaActiva(z)
                     setMesaNum(1)
                   }}
-                  className={`px-3 py-1 font-black text-xs rounded uppercase transition ${
+                  className={`px-3 py-1.5 font-extrabold text-xs rounded-lg uppercase transition-all ${
                     zonaActiva === z
-                      ? 'bg-slate-900 text-amber-400 shadow'
-                      : 'bg-amber-100/30 text-slate-900 hover:bg-amber-200'
+                      ? 'bg-amber-500 text-slate-950 shadow-md'
+                      : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
                   {z}
@@ -358,14 +358,14 @@ export default function HomePrincipal() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className="font-black text-xs uppercase">UBICACIÓN:</span>
-            
-            <div className="flex items-center gap-1">
+          {/* SELECCIÓN DE MESA Y CLIENTE */}
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800">
+              <span className="text-xs font-bold text-slate-400 pl-2 uppercase">Mesa:</span>
               <select
                 value={mesaNum}
                 onChange={(e) => setMesaNum(Number(e.target.value))}
-                className="bg-white text-slate-900 font-black px-3 py-1 rounded border-2 border-slate-900 text-base shadow"
+                className="bg-slate-900 text-amber-400 font-black px-3 py-1 rounded-lg text-sm border border-slate-800 focus:outline-none"
               >
                 {opcionesMesas.map((n) => {
                   const clave = `${zonaActiva}-${n}`
@@ -373,7 +373,7 @@ export default function HomePrincipal() {
                   const nombreVisual = obtenerNombreMesa(n)
                   return (
                     <option key={n} value={n}>
-                      {nombreVisual} {tieneItems ? '🔴 (Abierta)' : ''}
+                      {nombreVisual} {tieneItems ? '🔴' : ''}
                     </option>
                   )
                 })}
@@ -382,7 +382,7 @@ export default function HomePrincipal() {
               <button
                 onClick={renombrarMesa}
                 title="Cambiar nombre a esta mesa"
-                className="bg-slate-900 hover:bg-slate-800 text-amber-400 font-bold p-1.5 rounded border-2 border-slate-900 text-sm shadow active:scale-95 transition"
+                className="bg-slate-800 hover:bg-slate-700 text-amber-400 font-bold p-1.5 rounded-lg border border-slate-700 text-xs transition active:scale-95"
               >
                 ✏️
               </button>
@@ -390,91 +390,111 @@ export default function HomePrincipal() {
 
             <input
               type="text"
-              placeholder="Ej: Camiseta blanca / Gorra"
+              placeholder="👤 Nota o Alias Cliente"
               value={notaActual}
               onChange={(e) => handleNotaChange(e.target.value)}
-              className="bg-white text-slate-900 font-bold px-3 py-1 rounded border-2 border-slate-900 text-sm shadow placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900 w-56"
+              className="bg-slate-950 text-slate-100 font-bold px-3 py-1.5 rounded-xl border border-slate-800 text-xs placeholder-slate-500 focus:outline-none focus:border-amber-500/50 w-52"
             />
           </div>
         </header>
 
         {/* CONTENIDO PRINCIPAL */}
-        <div className="flex-1 flex overflow-hidden p-2 gap-2">
+        <div className="flex-1 flex overflow-hidden p-3 gap-3">
           
-          {/* TICKET Y TECLADO */}
-          <div className="w-4/12 flex flex-col gap-2 bg-slate-200 p-2 rounded border border-slate-300">
-            <div className="flex-1 bg-white border border-slate-300 rounded p-2 overflow-y-auto flex flex-col justify-between shadow-inner">
+          {/* PANEL IZQUIERDO: TICKET Y TECLADO */}
+          <div className="w-4/12 flex flex-col gap-2 bg-slate-900 p-3 rounded-2xl border border-slate-800/80 shadow-xl">
+            
+            {/* TICKET ACTUAL */}
+            <div className="flex-1 bg-slate-950 border border-slate-800/80 rounded-xl p-3 overflow-y-auto flex flex-col justify-between">
               <div>
-                <div className="flex justify-between font-black text-xs border-b border-slate-300 pb-1 mb-2 text-slate-500 uppercase">
-                  <span>Cant / Descripción</span>
-                  <span>Total</span>
+                <div className="flex justify-between items-center pb-2 border-b border-slate-800 text-[10px] font-black uppercase text-slate-500 tracking-wider">
+                  <span>Cant / Producto</span>
+                  <span>Importe</span>
                 </div>
+
                 {ticketActual.length === 0 ? (
-                  <div className="text-center text-slate-400 text-xs mt-10 italic">
-                    {zonaActiva} - {nombreMesaActual} {notaActual ? `("${notaActual}")` : ''} sin productos
+                  <div className="text-center text-slate-600 text-xs mt-16 font-medium">
+                    <span className="block text-2xl mb-1">🛒</span>
+                    Mesa vacía
                   </div>
                 ) : (
-                  <>
-                    <div className="bg-slate-100 border border-slate-300 text-slate-800 text-xs font-bold px-2 py-1 rounded mb-2 flex justify-between">
+                  <div className="space-y-1.5 mt-2">
+                    <div className="bg-slate-900 border border-slate-800/80 text-amber-400 text-xs font-black px-2.5 py-1.5 rounded-lg flex justify-between items-center">
                       <span>📍 {zonaActiva} - {nombreMesaActual}</span>
-                      {notaActual && <span>👤 {notaActual}</span>}
+                      {notaActual && <span className="text-slate-300 font-bold truncate max-w-[120px]">👤 {notaActual}</span>}
                     </div>
+
                     {ticketActual.map((item) => (
-                      <div key={item.id} className="flex justify-between items-center text-sm border-b border-slate-100 py-1.5">
-                        <div className="flex items-center gap-1.5">
-                          <button onClick={() => cambiarCantidadItem(item.id, -1)} className="w-5 h-5 bg-red-600 text-white font-black rounded text-xs">
-                            -
-                          </button>
-                          <button onClick={() => cambiarCantidadItem(item.id, 1)} className="w-5 h-5 bg-emerald-600 text-white font-black rounded text-xs">
-                            +
-                          </button>
-                          <span className="font-bold text-slate-800">{item.cantidad}x {item.nombre}</span>
+                      <div key={item.id} className="flex justify-between items-center py-1.5 border-b border-slate-900 text-xs">
+                        <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1 bg-slate-900 p-0.5 rounded-md border border-slate-800">
+                            <button
+                              onClick={() => cambiarCantidadItem(item.id, -1)}
+                              className="w-5 h-5 bg-rose-500/20 text-rose-400 font-black rounded hover:bg-rose-500 hover:text-white transition flex items-center justify-center text-xs"
+                            >
+                              -
+                            </button>
+                            <span className="font-extrabold text-slate-200 px-1">{item.cantidad}</span>
+                            <button
+                              onClick={() => cambiarCantidadItem(item.id, 1)}
+                              className="w-5 h-5 bg-emerald-500/20 text-emerald-400 font-black rounded hover:bg-emerald-500 hover:text-white transition flex items-center justify-center text-xs"
+                            >
+                              +
+                            </button>
+                          </div>
+                          <span className="font-bold text-slate-200 line-clamp-1">{item.nombre}</span>
                         </div>
-                        <span className="font-black text-slate-900">{(Number(item.precio) * item.cantidad).toFixed(2)}€</span>
+                        <span className="font-black text-amber-400 pl-2">
+                          {(Number(item.precio) * item.cantidad).toFixed(2)}€
+                        </span>
                       </div>
                     ))}
-                  </>
+                  </div>
                 )}
               </div>
 
-              <div className="bg-sky-100 border border-sky-300 p-2 rounded text-right mt-2">
-                <span className="text-xs font-bold text-sky-800 uppercase block">Total a pagar</span>
-                <span className="font-black text-2xl text-sky-950">{calcularTotal().toFixed(2)}€</span>
+              {/* TOTAL MESA */}
+              <div className="bg-slate-900 border border-slate-800 p-2.5 rounded-xl flex justify-between items-center mt-3">
+                <span className="text-xs font-black text-slate-400 uppercase">Total a pagar</span>
+                <span className="font-black text-2xl text-amber-400">{calcularTotal().toFixed(2)}€</span>
               </div>
             </div>
 
-            {/* TECLADO NUMÉRICO */}
-            <div className="grid grid-cols-4 gap-1 bg-slate-300 p-1.5 rounded border border-slate-400">
+            {/* TECLADO MULTIPLICADOR */}
+            <div className="grid grid-cols-4 gap-1.5 bg-slate-950 p-2 rounded-xl border border-slate-800">
               {[1, 2, 3, 'C', 4, 5, 6, 0, 7, 8, 9].map((val) => (
                 <button
                   key={val}
                   onClick={() => presionarTeclado(val)}
-                  className={`p-2 font-black text-base rounded shadow border transition active:scale-95 ${
-                    val === 'C' ? 'bg-red-500 text-white border-red-700' : 'bg-white text-slate-800 border-slate-300 hover:bg-slate-50'
+                  className={`py-2 font-black text-sm rounded-lg border transition active:scale-95 ${
+                    val === 'C'
+                      ? 'bg-rose-500/20 text-rose-400 border-rose-500/30 hover:bg-rose-500 hover:text-white'
+                      : 'bg-slate-900 text-slate-200 border-slate-800 hover:bg-slate-800'
                   }`}
                 >
                   {val}
                 </button>
               ))}
-              <div className="bg-amber-400 border border-amber-600 flex flex-col items-center justify-center font-black text-slate-900 rounded">
-                <span className="text-[9px] uppercase">Unid.</span>
-                <span className="text-base">{multiplicador}x</span>
+              <div className="bg-amber-500/10 border border-amber-500/30 flex flex-col items-center justify-center font-black text-amber-400 rounded-lg">
+                <span className="text-[9px] uppercase text-amber-500/80">Unid.</span>
+                <span className="text-sm">{multiplicador}x</span>
               </div>
             </div>
           </div>
 
-          {/* FAMILIAS Y PRODUCTOS DE BASE DE DATOS */}
-          <div className="w-8/12 flex flex-col gap-2">
+          {/* PANEL DERECHO: FAMILIAS, PRODUCTOS Y ACCIONES */}
+          <div className="w-8/12 flex flex-col gap-3">
             
-            <div className="grid grid-cols-4 gap-1.5">
+            {/* BARRA DE FAMILIAS */}
+            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
               {familias.map((f) => (
                 <button
                   key={f}
                   onClick={() => setFamiliaActiva(f)}
-                  className={`py-2.5 font-black text-xs uppercase rounded border-2 transition shadow ${
+                  className={`px-4 py-2.5 font-black text-xs uppercase rounded-xl border whitespace-nowrap transition-all shadow-sm ${
                     familiaActiva === f
-                      ? 'bg-slate-900 text-amber-400 border-slate-950 scale-[1.01]'
-                      : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                      ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-amber-500/10 scale-[1.02]'
+                      : 'bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800 hover:text-slate-200'
                   }`}
                 >
                   {f}
@@ -482,59 +502,64 @@ export default function HomePrincipal() {
               ))}
             </div>
 
-            <div className="flex-1 grid grid-cols-4 gap-2 bg-slate-200 p-2 rounded border border-slate-300 overflow-y-auto">
+            {/* GRID DE PRODUCTOS */}
+            <div className="flex-1 grid grid-cols-4 gap-2.5 bg-slate-900 p-3 rounded-2xl border border-slate-800/80 overflow-y-auto">
               {productosFiltrados.map((p) => (
                 <button
                   key={p.id}
                   onClick={() => agregarAlTicket(p)}
-                  className="bg-white hover:bg-amber-50 border-2 border-slate-300 hover:border-amber-400 rounded-xl p-2 flex flex-col justify-between h-24 shadow-sm active:scale-95 transition text-left group"
+                  className="bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-amber-500/50 rounded-2xl p-3 flex flex-col justify-between h-28 shadow-sm active:scale-95 transition text-left group"
                 >
                   <div className="flex justify-between items-start w-full">
-                    <span className="font-extrabold text-xs text-slate-800 uppercase leading-snug line-clamp-2">
+                    <span className="font-extrabold text-xs text-slate-200 uppercase leading-snug line-clamp-2">
                       {p.nombre}
                     </span>
-                    <span className="text-xl">{p.img || '🍽️'}</span>
+                    <span className="text-xl group-hover:scale-110 transition">{p.img || '🍽️'}</span>
                   </div>
-                  <div className="flex justify-between items-end border-t border-slate-100 pt-1 w-full">
-                    <span className="text-[10px] text-slate-400 font-bold uppercase">{p.destino}</span>
-                    <span className="text-base font-black text-amber-600">{Number(p.precio).toFixed(2)}€</span>
+                  <div className="flex justify-between items-end border-t border-slate-900 pt-1.5 w-full">
+                    <span className="text-[9px] text-slate-500 font-black uppercase">{p.destino}</span>
+                    <span className="text-sm font-black text-amber-400">{Number(p.precio).toFixed(2)}€</span>
                   </div>
                 </button>
               ))}
             </div>
 
-            {/* BOTONERA ACCIONES */}
+            {/* BOTONERA PRINCIPAL ACCIONES */}
             <div className="grid grid-cols-4 gap-2">
               <button
                 onClick={enviarComanda}
                 disabled={ticketActual.length === 0}
-                className="py-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-black text-xs uppercase rounded-lg border-b-4 border-blue-800 shadow"
+                className="py-3.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-30 text-white font-black text-xs uppercase rounded-xl shadow-lg shadow-blue-600/10 active:scale-95 transition flex items-center justify-center gap-1.5"
               >
-                📝 Enviar Comanda
+                <span>🚀</span>
+                <span>Enviar Comanda</span>
               </button>
 
               <button
                 onClick={cobrarEImprimir}
                 disabled={ticketActual.length === 0}
-                className="py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-black text-xs uppercase rounded-lg border-b-4 border-emerald-800 shadow"
+                className="py-3.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-30 text-white font-black text-xs uppercase rounded-xl shadow-lg shadow-emerald-600/10 active:scale-95 transition flex items-center justify-center gap-1.5"
               >
-                💳 Cobrar e Imprimir
+                <span>💳</span>
+                <span>Cobrar Ticket</span>
               </button>
 
               <button
                 onClick={() => window.print()}
                 disabled={ticketActual.length === 0}
-                className="py-3 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-900 font-black text-xs uppercase rounded-lg border-b-4 border-amber-700 shadow"
+                className="py-3.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-30 text-slate-950 font-black text-xs uppercase rounded-xl shadow-lg shadow-amber-500/10 active:scale-95 transition flex items-center justify-center gap-1.5"
               >
-                🖨️ Proforma
+                <span>🖨️</span>
+                <span>Proforma</span>
               </button>
 
               <button
                 onClick={borrarTicketMesa}
                 disabled={ticketActual.length === 0}
-                className="py-3 bg-rose-600 hover:bg-rose-500 disabled:opacity-40 text-white font-black text-xs uppercase rounded-lg border-b-4 border-rose-800 shadow"
+                className="py-3.5 bg-rose-600/20 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/30 disabled:opacity-30 font-black text-xs uppercase rounded-xl shadow-lg active:scale-95 transition flex items-center justify-center gap-1.5"
               >
-                🗑️ Anular Mesa
+                <span>🗑️</span>
+                <span>Anular Mesa</span>
               </button>
             </div>
 
