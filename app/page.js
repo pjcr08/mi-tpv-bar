@@ -74,7 +74,7 @@ export default function HomePrincipal() {
     }
   }
 
-  // CARGA COMANDAS ACTIVAS DESDE LA BD
+  // CARGA COMANDAS ACTIVAS DESDE LA BD (CORREGIDO)
   const cargarComandasServidor = async () => {
     try {
       const { data: pedidosBD, error } = await supabase
@@ -103,7 +103,7 @@ export default function HomePrincipal() {
           const clave = `${ped.mesas.zona}-${ped.mesas.numero}`
           nuevasNotas[clave] = ped.nota || ''
 
-          // Trae todas las líneas activas asociadas al pedido
+          // Se incluyen todas las líneas activas (pendiente, listo, marchado, borrador)
           const lineasValidas = (ped.lineas_pedido || []).filter(
             (l) => l.estado !== 'cancelado' && l.estado !== 'cobrado'
           )
@@ -192,8 +192,7 @@ export default function HomePrincipal() {
   const agregarAlTicket = (prod) => {
     const cantAgregar = Math.max(1, Number(multiplicador) || 1)
     const ticketExistente = ticketsPorMesa[claveMesaActual] || []
-    
-    // Busca si ya existe una línea local temporal no enviada para el mismo producto
+
     const existeIndice = ticketExistente.findIndex(
       (item) => item.nombre === prod.nombre && String(item.id).startsWith('temp-')
     )
@@ -286,6 +285,7 @@ export default function HomePrincipal() {
     }
   }
 
+  // ENVIAR COMANDA (CORREGIDO)
   const enviarComanda = async () => {
     if (ticketActual.length === 0) {
       alert('El ticket está vacío.')
@@ -296,7 +296,7 @@ export default function HomePrincipal() {
       const mesaId = await obtenerOCrearMesa()
       if (!mesaId) return
 
-      // 1. Obtener el pedido abierto existente ordenado por fecha
+      // 1. Buscar pedido abierto existente
       const { data: pedidoExistente, error: errPedidoExistente } = await supabase
         .from('pedidos')
         .select('id')
@@ -327,18 +327,10 @@ export default function HomePrincipal() {
         }
         if (nuevoPedido) pId = nuevoPedido.id
       } else {
-        const { error: errUpdNota } = await supabase
-          .from('pedidos')
-          .update({ nota: notaActual })
-          .eq('id', pId)
-
-        if (errUpdNota) {
-          alert(`Error al actualizar la nota del pedido: ${errUpdNota.message}`)
-          return
-        }
+        await supabase.from('pedidos').update({ nota: notaActual }).eq('id', pId)
       }
 
-      // 3. Procesar líneas: Insertar solo los elementos temporales/nuevos
+      // 3. Insertar solo los elementos en borrador / temporales
       if (pId) {
         const lineasNuevas = ticketActual
           .filter((item) => String(item.id).startsWith('temp-') || item.estado === 'borrador')
