@@ -1,93 +1,23 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 
-export default function BarraPage() {
-  const [comandasAgrupadas, setComandasAgrupadas] = useState([])
-  const [cargando, setCargando] = useState(true)
-
-  const fetchComandasBarra = async () => {
-    try {
-      // 1. Obtener las líneas pendientes para barra
-      const { data: lineas, error: errLineas } = await supabase
-        .from('lineas_pedido')
-        .select('*')
-        .eq('destino', 'barra')
-        .eq('estado', 'pendiente')
-        .order('created_at', { ascending: true })
-
-      if (errLineas) throw errLineas
-
-      if (!lineas || lineas.length === 0) {
-        setComandasAgrupadas([])
-        setCargando(false)
-        return
-      }
-
-      // 2. Extraer los IDs únicos de pedidos
-      const pedidoIds = [...new Set(lineas.map((l) => l.pedido_id))]
-
-      // 3. Consultar pedidos con relación a mesas
-      const { data: pedidos, error: errPedidos } = await supabase
-        .from('pedidos')
-        .select(`
-          id,
-          mesas (
-            numero,
-            zona
-          )
-        `)
-        .in('id', pedidoIds)
-
-      if (errPedidos) throw errPedidos
-
-      // 4. Mapear pedidos a su mesa correspondiente
-      const mapaMesas = {}
-      pedidos?.forEach((p) => {
-        if (p.mesas) {
-          const zona = p.mesas.zona ? p.mesas.zona.toUpperCase() : 'SALA'
-          mapaMesas[p.id] = `${zona} - Mesa ${p.mesas.numero}`
-        } else {
-          mapaMesas[p.id] = `Pedido #${p.id}`
-        }
-      })
-
-      // 5. Agrupar las líneas por comanda
-      const grupos = {}
-      lineas.forEach((linea) => {
-        const pId = linea.pedido_id
-        if (!grupos[pId]) {
-          grupos[pId] = {
-            pedido_id: pId,
-            mesa: mapaMesas[pId] || `Pedido #${pId}`,
-            hora: linea.created_at,
-            items: [],
-          }
-        }
-        grupos[pId].items.push(linea)
-      })
-
-      setComandasAgrupadas(Object.values(grupos))
-    } catch (err) {
-      console.error('Error cargando comanda de barra:', err)
-    } finally {
-      setCargando(false)
-    }
-  }
+export default function ComandasBarra() {
+  const [comandas, setComandas] = useState([])
 
   useEffect(() => {
-    fetchComandasBarra()
+    cargarComandas()
 
+    // Suscripción en tiempo real
     const channel = supabase
-      .channel('realtime_barra')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'lineas_pedido' },
-        () => {
-          fetchComandasBarra()
-        }
-      )
+      .channel('comandas-barra-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'lineas_pedido' }, () => {
+        cargarComandas()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, () => {
+        cargarComandas()
+      })
       .subscribe()
 
     return () => {
@@ -95,155 +25,194 @@ export default function BarraPage() {
     }
   }, [])
 
-  // 1. MARCAR COMANDA COMPLETA COMO SERVIDA
-  const marcarComandaCompleta = async (pedidoId) => {
-    setComandasAgrupadas((prev) => prev.filter((g) => g.pedido_id !== pedidoId))
+  const cargarComandas = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('pedidos')
+        .select(`
+          id,
+          nota,
+          created_at,
+          mesas ( zona, numero, nombre_custom ),
+          lineas_pedido ( id, producto_nombre, cantidad, destino, estado )
+        `)
+        .eq('estado', 'abierto')
+        .order('created_at', { ascending: true })
 
-    const { error } = await supabase
-      .from('lineas_pedido')
-      .update({ estado: 'servido' })
-      .eq('pedido_id', pedidoId)
-      .eq('destino', 'barra')
+      if (error) throw error
 
-    if (error) {
-      console.error('Error en Supabase:', error.message)
-      fetchComandasBarra()
-    }
-  }
+      // Agrupar pedidos que tengan productos pendientes para BARRA
+      const comandasProcesadas = (data || [])
+        .map((pedido) => {
+          const lineasBarra = (pedido.lineas_pedido || []).filter(
+            (l) => l.destino === 'barra' && l.estado === 'pendiente'
+          )
 
-  // 2. BORRAR/CANCELAR COMANDA DE BARRA
-  const borrarComanda = async (pedidoId) => {
-    if (!confirm('¿Seguro que quieres BORRAR esta comanda de barra?')) return
+          if (lineasBarra.length === 0) return null
 
-    setComandasAgrupadas((prev) => prev.filter((g) => g.pedido_id !== pedidoId))
+          // Nombre de la mesa (custom o predeterminado)
+          const zona = pedido.mesas?.zona || 'Sin Zona'
+          const num = pedido.mesas?.numero || ''
+          const custom = pedido.mesas?.nombre_custom
+          const nombreMesa = custom ? custom : `Mesa ${num}`
 
-    const { error } = await supabase
-      .from('lineas_pedido')
-      .delete()
-      .eq('pedido_id', pedidoId)
-      .eq('destino', 'barra')
+          // Formatear hora (HH:MM)
+          const hora = new Date(pedido.created_at).toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+          })
 
-    if (error) {
-      console.error('Error al borrar comanda:', error.message)
-      fetchComandasBarra()
-    }
-  }
-
-  // 3. MARCAR UN SOLO ÍTEM COMO SERVIDO (Actualización local optimista)
-  const marcarItemListo = async (id, pedidoId) => {
-    setComandasAgrupadas((prev) =>
-      prev
-        .map((grupo) => {
-          if (grupo.pedido_id !== pedidoId) return grupo
-          const itemsFiltrados = grupo.items.filter((item) => item.id !== id)
-          return { ...grupo, items: itemsFiltrados }
+          return {
+            pedidoId: pedido.id,
+            zona,
+            mesa: nombreMesa,
+            alias: pedido.nota || '',
+            hora,
+            lineas: lineasBarra,
+          }
         })
-        .filter((grupo) => grupo.items.length > 0)
-    )
+        .filter(Boolean)
 
-    const { error } = await supabase
-      .from('lineas_pedido')
-      .update({ estado: 'servido' })
-      .eq('id', id)
-
-    if (error) {
-      console.error('Error al marcar ítem servido:', error.message)
-      fetchComandasBarra()
+      setComandas(comandasProcesadas)
+    } catch (err) {
+      console.error('Error cargando comandas de barra:', err)
     }
   }
 
-  const obtenerHora = (fechaIso) => {
-    if (!fechaIso) return '--:--'
-    const d = new Date(fechaIso)
-    return isNaN(d.getTime())
-      ? '--:--'
-      : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  const marcarLineaServida = async (lineaId) => {
+    try {
+      await supabase
+        .from('lineas_pedido')
+        .update({ estado: 'servido' })
+        .eq('id', lineaId)
+
+      cargarComandas()
+    } catch (err) {
+      console.error('Error al marcar linea servida:', err)
+    }
+  }
+
+  const servirTodoElPedido = async (lineas) => {
+    try {
+      const ids = lineas.map((l) => l.id)
+      await supabase
+        .from('lineas_pedido')
+        .update({ estado: 'servido' })
+        .in('id', ids)
+
+      cargarComandas()
+    } catch (err) {
+      console.error('Error al servir todo el pedido:', err)
+    }
+  }
+
+  const borrarPedidoComanda = async (pedidoId) => {
+    try {
+      // Cancelar las líneas pertenecientes a la barra de este pedido
+      const comandaActual = comandas.find((c) => c.pedidoId === pedidoId)
+      if (!comandaActual) return
+
+      const ids = comandaActual.lineas.map((l) => l.id)
+      await supabase
+        .from('lineas_pedido')
+        .update({ estado: 'cancelado' })
+        .in('id', ids)
+
+      cargarComandas()
+    } catch (err) {
+      console.error('Error al borrar comanda:', err)
+    }
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 p-4 font-sans select-none">
-      <header className="flex justify-between items-center mb-6 pb-3 border-b border-slate-800">
-        <div className="flex items-center gap-3">
-          <span className="text-3xl">🍹</span>
-          <div>
-            <h1 className="text-xl font-black text-sky-400 tracking-wider">
-              COMANDAS DE BARRA
-            </h1>
-            <p className="text-xs text-slate-400 font-medium">
-              Bebidas y tragos pendientes
-            </p>
-          </div>
+    <div className="min-h-screen bg-slate-950 text-slate-100 p-6 font-sans select-none">
+      {/* ENCABEZADO */}
+      <header className="mb-6 flex items-center gap-3 border-b border-slate-800 pb-4">
+        <span className="text-3xl">🍹</span>
+        <div>
+          <h1 className="text-2xl font-black tracking-wider text-cyan-400 uppercase">
+            COMANDAS DE BARRA
+          </h1>
+          <p className="text-xs text-slate-400 font-semibold">
+            Bebidas y tragos pendientes
+          </p>
         </div>
-        <button
-          onClick={fetchComandasBarra}
-          className="flex items-center gap-2 bg-slate-900 border border-slate-800 hover:border-slate-700 px-3 py-1.5 rounded-xl text-xs font-bold text-slate-300 transition"
-        >
-          🔄 Recargar
-        </button>
       </header>
 
-      {cargando ? (
-        <div className="text-center py-20 text-slate-500 text-sm">
-          Cargando bebidas...
-        </div>
-      ) : comandasAgrupadas.length === 0 ? (
-        <div className="text-center py-20 text-slate-500 font-bold text-sm bg-slate-900/50 border border-dashed border-slate-800 rounded-2xl">
-          🥂 ¡Barra despejada! No hay bebidas pendientes.
+      {/* GRID DE CARDS DE COMANDAS */}
+      {comandas.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-24 text-slate-600">
+          <span className="text-5xl mb-2">✨</span>
+          <p className="text-sm font-bold uppercase tracking-widest">
+            Sin comandas pendientes en barra
+          </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {comandasAgrupadas.map((grupo) => (
+          {comandas.map((cmd) => (
             <div
-              key={grupo.pedido_id}
-              className="bg-slate-900 border-2 border-sky-500/80 rounded-2xl p-4 flex flex-col justify-between shadow-xl"
+              key={cmd.pedidoId}
+              className="bg-slate-900 border-2 border-cyan-500/50 rounded-2xl p-4 shadow-xl flex flex-col justify-between gap-3"
             >
+              {/* CABECERA DE LA CARD DE COMANDA */}
               <div>
-                {/* CABECERA CON MESA Y HORA */}
-                <div className="flex justify-between items-center mb-3 pb-2 border-b border-slate-800">
-                  <span className="font-black text-sky-400 text-base uppercase tracking-wide">
-                    {grupo.mesa}
-                  </span>
-                  <span className="text-[11px] font-bold text-slate-400 bg-slate-800 px-2 py-1 rounded-lg">
-                    ⏱️ {obtenerHora(grupo.hora)}
+                <div className="flex justify-between items-start border-b border-slate-800 pb-2">
+                  <div>
+                    <h2 className="text-base font-black text-cyan-400 uppercase tracking-wide">
+                      {cmd.zona} - {cmd.mesa}
+                    </h2>
+                    {/* ALIAS / NOTA DE CLIENTE */}
+                    {cmd.alias && (
+                      <span className="inline-block mt-1 bg-cyan-500/10 text-cyan-300 font-extrabold text-xs px-2 py-0.5 rounded-md border border-cyan-500/30">
+                        👤 {cmd.alias}
+                      </span>
+                    )}
+                  </div>
+
+                  <span className="bg-slate-950 text-slate-400 text-[10px] font-bold px-2 py-1 rounded-md border border-slate-800 flex items-center gap-1">
+                    ⏰ {cmd.hora}
                   </span>
                 </div>
 
-                {/* BEBIDAS */}
-                <ul className="space-y-2 mb-4">
-                  {grupo.items.map((item) => (
-                    <li
-                      key={item.id}
-                      className="w-full p-2.5 rounded-xl border border-slate-800 bg-slate-950 flex items-center justify-between text-left"
+                {/* LISTA DE LÍNEAS DE PEDIDO */}
+                <div className="space-y-2 mt-3">
+                  {cmd.lineas.map((linea) => (
+                    <div
+                      key={linea.id}
+                      className="bg-slate-950 border border-slate-800 rounded-xl p-2.5 flex justify-between items-center"
                     >
-                      <span className="text-xs font-bold text-slate-100">
-                        <strong className="text-sky-400 mr-1.5">
-                          {item.cantidad || 1}x
+                      <span className="font-extrabold text-sm text-slate-100">
+                        <strong className="text-cyan-400 font-black mr-1.5">
+                          {linea.cantidad}x
                         </strong>
-                        {item.producto_nombre}
+                        {linea.producto_nombre}
                       </span>
+
                       <button
-                        onClick={() => marcarItemListo(item.id, grupo.pedido_id)}
-                        className="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500 hover:text-slate-950 font-black text-xs flex items-center justify-center transition active:scale-95"
+                        onClick={() => marcarLineaServida(linea.id)}
+                        className="w-8 h-8 bg-emerald-500/20 hover:bg-emerald-500 text-emerald-400 hover:text-white rounded-lg border border-emerald-500/30 flex items-center justify-center font-black transition active:scale-95"
+                        title="Marcar como servido"
                       >
                         ✓
                       </button>
-                    </li>
+                    </div>
                   ))}
-                </ul>
+                </div>
               </div>
 
-              {/* ACCIONES DEL PEDIDO */}
-              <div className="flex gap-2">
+              {/* BOTONERA INFERIOR */}
+              <div className="flex gap-2 pt-2 border-t border-slate-800">
                 <button
-                  onClick={() => marcarComandaCompleta(grupo.pedido_id)}
-                  className="flex-1 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs uppercase tracking-wider transition active:scale-95 shadow-lg shadow-emerald-500/20"
+                  onClick={() => servirTodoElPedido(cmd.lineas)}
+                  className="flex-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black py-2.5 rounded-xl text-xs uppercase tracking-wider transition active:scale-95 flex items-center justify-center gap-1 shadow-md shadow-emerald-500/10"
                 >
                   ✓ SERVIR TODO
                 </button>
+
                 <button
-                  onClick={() => borrarComanda(grupo.pedido_id)}
-                  title="Borrar comanda"
-                  className="px-3 py-3 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 border border-rose-500/30 font-black text-xs transition active:scale-95"
+                  onClick={() => borrarPedidoComanda(cmd.pedidoId)}
+                  className="bg-rose-500/20 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/30 p-2.5 rounded-xl transition active:scale-95 flex items-center justify-center"
+                  title="Anular comanda"
                 >
                   🗑️
                 </button>
