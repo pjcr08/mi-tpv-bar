@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 
 export default function HomePrincipal() {
@@ -8,55 +8,26 @@ export default function HomePrincipal() {
   const [familiaActiva, setFamiliaActiva] = useState('')
   const [productos, setProductos] = useState([])
 
-  // ZONA Y MESAS
   const [zonaActiva, setZonaActiva] = useState('Terraza')
   const [mesaNum, setMesaNum] = useState(1)
-
-  // NOMBRES PERSONALIZADOS PARA MESAS
   const [nombresMesas, setNombresMesas] = useState({})
 
-  // ESTADO DE TICKETS Y NOTAS PERSISTENTES POR MESA
   const [ticketsPorMesa, setTicketsPorMesa] = useState({})
   const [notasPorMesa, setNotasPorMesa] = useState({})
-
-  // Multiplicador / Unidades
-  const [multiplicador, setMultiplicador] = useState(1)
+  const [multiplicador, setMultiplicador] = useState('1')
 
   const claveMesaActual = `${zonaActiva}-${mesaNum}`
   const ticketActual = ticketsPorMesa[claveMesaActual] || []
   const notaActual = notasPorMesa[claveMesaActual] || ''
 
-  const obtenerNombreMesa = (num, zona = zonaActiva) => {
-    const clave = `${zona}-${num}`
-    return nombresMesas[clave] || `Mesa ${num}`
-  }
+  const obtenerNombreMesa = useCallback(
+    (num, zona = zonaActiva) => nombresMesas[`${zona}-${num}`] || `Mesa ${num}`,
+    [nombresMesas, zonaActiva]
+  )
 
   const nombreMesaActual = obtenerNombreMesa(mesaNum)
 
-  useEffect(() => {
-    cargarProductos()
-    cargarNombresMesas()
-    cargarComandasServidor()
-
-    // ESCUCHA EN TIEMPO REAL (REALTIME DE SUPABASE)
-    const channel = supabase
-      .channel('tpv-realtime-home')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, () => {
-        cargarComandasServidor()
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'lineas_pedido' }, () => {
-        cargarComandasServidor()
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'mesas' }, () => {
-        cargarNombresMesas()
-      })
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [zonaActiva, mesaNum])
-
+  // Cargar productos
   const cargarProductos = async () => {
     try {
       const { data, error } = await supabase.from('productos').select('*')
@@ -72,6 +43,7 @@ export default function HomePrincipal() {
     }
   }
 
+  // Cargar nombres personalizados
   const cargarNombresMesas = async () => {
     try {
       const { data } = await supabase.from('mesas').select('zona, numero, nombre_custom')
@@ -87,7 +59,7 @@ export default function HomePrincipal() {
     }
   }
 
-  // Carga las comandas activas sincronizadas desde la BD / PDA
+  // Cargar comandas desde la BD
   const cargarComandasServidor = async () => {
     try {
       const { data: pedidosBD } = await supabase
@@ -111,7 +83,6 @@ export default function HomePrincipal() {
           const clave = `${ped.mesas.zona}-${ped.mesas.numero}`
           nuevasNotas[clave] = ped.nota || ''
 
-          // Carga únicamente las líneas que no estén canceladas o ya cobradas
           const lineasValidas = (ped.lineas_pedido || []).filter(
             (l) => l.estado !== 'cancelado' && l.estado !== 'cobrado'
           )
@@ -130,24 +101,45 @@ export default function HomePrincipal() {
       setTicketsPorMesa(nuevosTickets)
       setNotasPorMesa(nuevasNotas)
     } catch (err) {
-      console.error('Error cargando comandas activas:', err)
+      console.error('Error cargando comandas:', err)
     }
   }
 
+  // Carga inicial y canal realtime único
+  useEffect(() => {
+    cargarProductos()
+    cargarNombresMesas()
+    cargarComandasServidor()
+
+    const channel = supabase
+      .channel('tpv-realtime-home')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, () => {
+        cargarComandasServidor()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'lineas_pedido' }, () => {
+        cargarComandasServidor()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mesas' }, () => {
+        cargarNombresMesas()
+      })
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [])
+
   const handleNotaChange = (nuevaNota) => {
-    setNotasPorMesa({ ...notasPorMesa, [claveMesaActual]: nuevaNota })
+    setNotasPorMesa((prev) => ({ ...prev, [claveMesaActual]: nuevaNota }))
   }
 
   const renombrarMesa = async () => {
     const nombreActual = obtenerNombreMesa(mesaNum)
-    const nuevoNombre = prompt(`Introduce un nuevo nombre para ${zonaActiva} - ${nombreActual}:`, nombreActual)
+    const nuevoNombre = prompt(`Nuevo nombre para ${zonaActiva} - ${nombreActual}:`, nombreActual)
 
     if (nuevoNombre !== null && nuevoNombre.trim() !== '') {
       const nombreLimpio = nuevoNombre.trim()
-      setNombresMesas({
-        ...nombresMesas,
-        [claveMesaActual]: nombreLimpio,
-      })
+      setNombresMesas((prev) => ({ ...prev, [claveMesaActual]: nombreLimpio }))
 
       const { data: mesaBD } = await supabase
         .from('mesas')
@@ -165,21 +157,21 @@ export default function HomePrincipal() {
   }
 
   const agregarAlTicket = (prod) => {
-    const cantAgregar = multiplicador > 0 ? multiplicador : 1
+    const unidades = Math.max(1, Number(multiplicador) || 1)
     const ticketExistente = ticketsPorMesa[claveMesaActual] || []
     const existe = ticketExistente.find((item) => item.nombre === prod.nombre)
 
     let nuevoTicket = []
     if (existe) {
       nuevoTicket = ticketExistente.map((item) =>
-        item.nombre === prod.nombre ? { ...item, cantidad: item.cantidad + cantAgregar } : item
+        item.nombre === prod.nombre ? { ...item, cantidad: item.cantidad + unidades } : item
       )
     } else {
-      nuevoTicket = [...ticketExistente, { ...prod, id: Date.now(), cantidad: cantAgregar }]
+      nuevoTicket = [...ticketExistente, { ...prod, id: `temp-${Date.now()}`, cantidad: unidades }]
     }
 
-    setTicketsPorMesa({ ...ticketsPorMesa, [claveMesaActual]: nuevoTicket })
-    setMultiplicador(1)
+    setTicketsPorMesa((prev) => ({ ...prev, [claveMesaActual]: nuevoTicket }))
+    setMultiplicador('1')
   }
 
   const cambiarCantidadItem = (id, delta) => {
@@ -188,19 +180,18 @@ export default function HomePrincipal() {
       .map((item) => (item.id === id ? { ...item, cantidad: item.cantidad + delta } : item))
       .filter((item) => item.cantidad > 0)
 
-    setTicketsPorMesa({ ...ticketsPorMesa, [claveMesaActual]: nuevoTicket })
+    setTicketsPorMesa((prev) => ({ ...prev, [claveMesaActual]: nuevoTicket }))
   }
 
   const calcularTotal = () => {
     return ticketActual.reduce((sum, item) => sum + Number(item.precio) * item.cantidad, 0)
   }
 
-  const presionarTeclado = (num) => {
-    if (num === 'C') {
-      setMultiplicador(1)
+  const presionarTeclado = (val) => {
+    if (val === 'C') {
+      setMultiplicador('1')
     } else {
-      const nuevoVal = multiplicador === 1 ? String(num) : String(multiplicador) + String(num)
-      setMultiplicador(Number(nuevoVal))
+      setMultiplicador((prev) => (prev === '1' ? String(val) : prev + String(val)))
     }
   }
 
@@ -218,7 +209,7 @@ export default function HomePrincipal() {
       const { data: nuevaMesa } = await supabase
         .from('mesas')
         .insert([{ numero: mesaNum, zona: zonaActiva }])
-        .select()
+        .select('id')
         .single()
 
       return nuevaMesa ? nuevaMesa.id : null
@@ -232,8 +223,8 @@ export default function HomePrincipal() {
 
     try {
       const mesaId = await obtenerOCrearMesa()
-      
-      // Consultar si la mesa ya tiene un pedido en estado 'abierto'
+      if (!mesaId) return
+
       const { data: pedidoExistente } = await supabase
         .from('pedidos')
         .select('id')
@@ -247,7 +238,7 @@ export default function HomePrincipal() {
         const { data: nuevoPedido } = await supabase
           .from('pedidos')
           .insert([{ mesa_id: mesaId, estado: 'abierto', nota: notaActual }])
-          .select()
+          .select('id')
           .single()
         if (nuevoPedido) pId = nuevoPedido.id
       } else {
@@ -255,7 +246,6 @@ export default function HomePrincipal() {
       }
 
       if (pId) {
-        // Eliminar líneas anteriores de este pedido para reescribir con las nuevas
         await supabase.from('lineas_pedido').delete().eq('pedido_id', pId)
 
         const lineas = ticketActual.map((item) => ({
@@ -270,11 +260,10 @@ export default function HomePrincipal() {
         await supabase.from('lineas_pedido').insert(lineas)
       }
 
-      setMultiplicador(1)
-      alert(`🚀 Comanda enviada: ${zonaActiva} - ${nombreMesaActual}`)
+      setMultiplicador('1')
       cargarComandasServidor()
     } catch (err) {
-      alert(`❌ Error al enviar comanda: ${err.message || 'Error de conexión'}`)
+      console.error('Error al enviar comanda:', err)
     }
   }
 
@@ -285,19 +274,23 @@ export default function HomePrincipal() {
       window.print()
       const mesaId = await obtenerOCrearMesa()
 
-      // Marcar comandas abiertas como cobradas
-      await supabase.from('pedidos').update({ estado: 'cobrado' }).eq('mesa_id', mesaId).eq('estado', 'abierto')
+      if (mesaId) {
+        await supabase.from('pedidos').update({ estado: 'cobrado' }).eq('mesa_id', mesaId).eq('estado', 'abierto')
+      }
 
-      const copiaTickets = { ...ticketsPorMesa }
-      delete copiaTickets[claveMesaActual]
-      setTicketsPorMesa(copiaTickets)
+      setTicketsPorMesa((prev) => {
+        const copia = { ...prev }
+        delete copia[claveMesaActual]
+        return copia
+      })
 
-      const copiaNotas = { ...notasPorMesa }
-      delete copiaNotas[claveMesaActual]
-      setNotasPorMesa(copiaNotas)
+      setNotasPorMesa((prev) => {
+        const copia = { ...prev }
+        delete copia[claveMesaActual]
+        return copia
+      })
 
-      setMultiplicador(1)
-      alert('💳 Cobro registrado')
+      setMultiplicador('1')
       cargarComandasServidor()
     } catch (e) {
       console.error(e)
@@ -306,15 +299,20 @@ export default function HomePrincipal() {
 
   const borrarTicketMesa = async () => {
     if (confirm(`¿Limpiar ticket de ${zonaActiva} - ${nombreMesaActual}?`)) {
-      const copiaTickets = { ...ticketsPorMesa }
-      delete copiaTickets[claveMesaActual]
-      setTicketsPorMesa(copiaTickets)
-
-      const copiaNotas = { ...notasPorMesa }
-      delete copiaNotas[claveMesaActual]
-      setNotasPorMesa(copiaNotas)
-
       const mesaId = await obtenerOCrearMesa()
+
+      setTicketsPorMesa((prev) => {
+        const copia = { ...prev }
+        delete copia[claveMesaActual]
+        return copia
+      })
+
+      setNotasPorMesa((prev) => {
+        const copia = { ...prev }
+        delete copia[claveMesaActual]
+        return copia
+      })
+
       if (mesaId) {
         await supabase.from('pedidos').update({ estado: 'cancelado' }).eq('mesa_id', mesaId).eq('estado', 'abierto')
       }
@@ -341,7 +339,6 @@ export default function HomePrincipal() {
       `}</style>
 
       <div className="h-screen bg-slate-950 text-slate-100 flex flex-col no-imprimir select-none font-sans overflow-hidden">
-        
         {/* ENCABEZADO TPV */}
         <header className="bg-slate-900 border-b border-slate-800 px-4 py-2 flex justify-between items-center shadow-lg">
           <div className="flex items-center gap-4">
@@ -413,10 +410,8 @@ export default function HomePrincipal() {
 
         {/* CONTENIDO PRINCIPAL */}
         <div className="flex-1 flex overflow-hidden p-3 gap-3">
-          
           {/* PANEL IZQUIERDO: TICKET Y TECLADO */}
           <div className="w-4/12 flex flex-col gap-2 bg-slate-900 p-3 rounded-2xl border border-slate-800/80 shadow-xl">
-            
             {/* TICKET ACTUAL */}
             <div className="flex-1 bg-slate-950 border border-slate-800/80 rounded-xl p-3 overflow-y-auto flex flex-col justify-between">
               <div>
@@ -497,7 +492,6 @@ export default function HomePrincipal() {
 
           {/* PANEL DERECHO: FAMILIAS, PRODUCTOS Y ACCIONES */}
           <div className="w-8/12 flex flex-col gap-3">
-            
             {/* BARRA DE FAMILIAS */}
             <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
               {familias.map((f) => (
@@ -575,9 +569,7 @@ export default function HomePrincipal() {
                 <span>Anular Mesa</span>
               </button>
             </div>
-
           </div>
-
         </div>
       </div>
 
