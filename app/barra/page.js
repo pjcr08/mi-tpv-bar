@@ -12,7 +12,7 @@ export default function ComandasBarra() {
     try {
       setErrorBD(null)
 
-      // Consultar pedidos abiertos
+      // Consultar pedidos abiertos especificando la relación Foreign Key exacta
       const { data, error } = await supabase
         .from('pedidos')
         .select(`
@@ -20,7 +20,7 @@ export default function ComandasBarra() {
           nota,
           created_at,
           mesas ( zona, numero, nombre_custom ),
-          lineas_pedido ( id, producto_nombre, cantidad, destino, estado )
+          lineas_pedido!lineas_pedido_pedido_id_fkey ( id, producto_nombre, cantidad, destino, estado )
         `)
         .eq('estado', 'abierto')
         .order('created_at', { ascending: true })
