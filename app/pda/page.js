@@ -4,18 +4,12 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 
 export default function PdaView() {
-  // Autenticación Real Supabase
   const [usuario, setUsuario] = useState(null)
   const [emailInput, setEmailInput] = useState('')
   const [passInput, setPassInput] = useState('')
   const [errorLogin, setErrorLogin] = useState('')
   const [cargandoAuth, setCargandoAuth] = useState(false)
 
-  // Control Fichaje
-  const [fichado, setFichado] = useState(false)
-  const [horaFichaje, setHoraFichaje] = useState(null)
-
-  // Estados TPV / PDA
   const [zonaActiva, setZonaActiva] = useState('Terraza')
   const [mesaNum, setMesaNum] = useState(1)
   const [nombresMesas, setNombresMesas] = useState({})
@@ -23,19 +17,17 @@ export default function PdaView() {
 
   const [productos, setProductos] = useState([])
   const [familias, setFamilias] = useState([])
-  const [familiaActiva, setFamiliaActiva] = useState('')
+  const [familiaActiva, setFamiliaActiva] = useState('TODOS')
+  const [cargandoProductos, setCargandoProductos] = useState(true)
 
-  // Estado del pedido de la mesa seleccionada
   const [comandaActual, setComandaActual] = useState([])
   const [pedidoIdActual, setPedidoIdActual] = useState(null)
   const [aliasActual, setAliasActual] = useState('')
   const [enviando, setEnviando] = useState(false)
 
-  // Modales UI
   const [modalMesaAbierto, setModalMesaAbierto] = useState(false)
   const [verComandaMobile, setVerComandaMobile] = useState(false)
 
-  // 1. Comprobar sesión activa
   useEffect(() => {
     const checkSession = async () => {
       const { data: { session } } = await supabase.auth.getSession()
@@ -44,21 +36,20 @@ export default function PdaView() {
     checkSession()
   }, [])
 
-  // 2. Cargar datos iniciales
   useEffect(() => {
     cargarProductos()
     cargarNombresMesas()
     cargarMesasOcupadas()
   }, [])
 
-  // 3. SUSCRIPCIÓN EN TIEMPO REAL GLOBAL (Mesas, Pedidos y Líneas)
-  // Sincroniza lo que ocurra en el TPV Central o en cualquier otra PDA
+  useEffect(() => {
+    cargarPedidoMesaActual()
+  }, [zonaActiva, mesaNum])
+
+  // Escuchar cambios en tiempo real del ordenador central o cocina
   useEffect(() => {
     const channelGlobal = supabase
-      .channel('tpv-pda-sync-global')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'mesas' }, () => {
-        cargarNombresMesas()
-      })
+      .channel('pda-tpv-sync')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, () => {
         cargarMesasOcupadas()
         cargarPedidoMesaActual()
@@ -74,175 +65,112 @@ export default function PdaView() {
     }
   }, [zonaActiva, mesaNum])
 
-  const handleLogin = async (e) => {
-    e.preventDefault()
-    setErrorLogin('')
-    setCargandoAuth(true)
-
-    try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: emailInput,
-        password: passInput,
-      })
-
-      if (error) {
-        setErrorLogin('Credenciales inválidas.')
-      } else if (data.user) {
-        setUsuario(data.user)
-      }
-    } catch (err) {
-      setErrorLogin('Error de conexión.')
-    } finally {
-      setCargandoAuth(false)
-    }
-  }
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut()
-    setUsuario(null)
-    setEmailInput('')
-    setPassInput('')
-  }
-
-  const toggleFichaje = () => {
-    const ahora = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    if (!fichado) {
-      setFichado(true)
-      setHoraFichaje(ahora)
-    } else {
-      setFichado(false)
-      setHoraFichaje(null)
-    }
-  }
-
   const cargarProductos = async () => {
+    setCargandoProductos(true)
     try {
       const { data, error } = await supabase.from('productos').select('*')
-      if (error || !data) return
-      setProductos(data)
-      const fams = [...new Set(data.map((p) => p.familia))].filter(Boolean)
-      if (fams.length > 0) {
-        setFamilias(fams)
-        setFamiliaActiva(fams[0])
+      if (error) throw error
+      if (data) {
+        setProductos(data)
+        const fams = Array.from(new Set(data.map((p) => p.familia).filter(Boolean)))
+        setFamilias(['TODOS', ...fams])
       }
     } catch (err) {
       console.error('Error cargando productos:', err)
+    } finally {
+      setCargandoProductos(false)
     }
   }
 
   const cargarNombresMesas = async () => {
-    try {
-      const { data, error } = await supabase.from('mesas').select('zona, numero, nombre_custom')
-      if (data && !error) {
-        const mapa = {}
-        data.forEach((m) => {
-          if (m.nombre_custom) mapa[`${m.zona}-${m.numero}`] = m.nombre_custom
-        })
-        setNombresMesas(mapa)
-      }
-    } catch (e) {
-      console.error(e)
+    const { data } = await supabase.from('mesas').select('zona, numero, nombre_custom')
+    if (data) {
+      const mapa = {}
+      data.forEach((m) => {
+        if (m.nombre_custom) mapa[`${m.zona}-${m.numero}`] = m.nombre_custom
+      })
+      setNombresMesas(mapa)
     }
   }
 
   const cargarMesasOcupadas = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('pedidos')
-        .select(`
-          id,
-          mesa_id,
-          mesas ( zona, numero ),
-          lineas_pedido ( precio, cantidad )
-        `)
-        .eq('estado', 'abierto')
+    const { data } = await supabase
+      .from('pedidos')
+      .select('id, mesa_id, mesas(zona, numero), lineas_pedido(precio, cantidad)')
+      .eq('estado', 'abierto')
 
-      if (error || !data) return
-
-      const ocupadas = {}
-      data.forEach((p) => {
-        if (p.mesas) {
-          const clave = `${p.mesas.zona}-${p.mesas.numero}`
-          const totalMesa = p.lineas_pedido?.reduce((sum, l) => sum + Number(l.precio) * l.cantidad, 0) || 0
-          
-          if (totalMesa > 0 && p.lineas_pedido && p.lineas_pedido.length > 0) {
-            ocupadas[clave] = { pedidoId: p.id, total: totalMesa }
-          }
-        }
-      })
-      setMesasOcupadasMap(ocupadas)
-    } catch (e) {
-      console.error('Error ocupación:', e)
-    }
+    if (!data) return
+    const ocupadas = {}
+    data.forEach((p) => {
+      if (p.mesas) {
+        const clave = `${p.mesas.zona}-${p.mesas.numero}`
+        const totalMesa = p.lineas_pedido?.reduce((sum, l) => sum + Number(l.precio) * l.cantidad, 0) || 0
+        if (totalMesa > 0) ocupadas[clave] = { pedidoId: p.id, total: totalMesa }
+      }
+    })
+    setMesasOcupadasMap(ocupadas)
   }
 
   const cargarPedidoMesaActual = async () => {
-    try {
-      const { data: mesa } = await supabase
-        .from('mesas')
-        .select('id')
-        .eq('zona', zonaActiva)
-        .eq('numero', mesaNum)
-        .maybeSingle()
+    const { data: mesa } = await supabase
+      .from('mesas')
+      .select('id')
+      .eq('zona', zonaActiva)
+      .eq('numero', mesaNum)
+      .maybeSingle()
 
-      if (!mesa) {
-        setComandaActual([])
-        setPedidoIdActual(null)
-        setAliasActual('')
-        return
-      }
+    if (!mesa) {
+      setComandaActual([])
+      setPedidoIdActual(null)
+      setAliasActual('')
+      return
+    }
 
-      const { data: pedido } = await supabase
-        .from('pedidos')
-        .select('id, nota')
-        .eq('mesa_id', mesa.id)
-        .eq('estado', 'abierto')
-        .maybeSingle()
+    const { data: pedido } = await supabase
+      .from('pedidos')
+      .select('id, nota')
+      .eq('mesa_id', mesa.id)
+      .eq('estado', 'abierto')
+      .maybeSingle()
 
-      if (!pedido) {
-        setComandaActual([])
-        setPedidoIdActual(null)
-        setAliasActual('')
-        return
-      }
+    if (!pedido) {
+      setComandaActual([])
+      setPedidoIdActual(null)
+      setAliasActual('')
+      return
+    }
 
-      setPedidoIdActual(pedido.id)
-      setAliasActual(pedido.nota || '')
+    setPedidoIdActual(pedido.id)
+    setAliasActual(pedido.nota || '')
 
-      const { data: lineas } = await supabase
-        .from('lineas_pedido')
-        .select('*')
-        .eq('pedido_id', pedido.id)
-        .order('id', { ascending: true })
+    const { data: lineas } = await supabase
+      .from('lineas_pedido')
+      .select('*')
+      .eq('pedido_id', pedido.id)
+      .order('id', { ascending: true })
 
-      if (lineas) {
-        setComandaActual(
-          lineas.map((l) => ({
-            id_linea: l.id,
-            nombre: l.producto_nombre,
-            precio: Number(l.precio),
-            cantidad: l.cantidad,
-            destino: l.destino || 'barra',
-            estado: l.estado,
-          }))
-        )
-      }
-    } catch (err) {
-      console.error('Error comanda:', err)
+    if (lineas) {
+      setComandaActual(
+        lineas.map((l) => ({
+          id_linea: l.id,
+          nombre: l.producto_nombre,
+          precio: Number(l.precio),
+          cantidad: l.cantidad,
+          destino: l.destino || 'barra',
+          estado: l.estado,
+        }))
+      )
     }
   }
 
-  const obtenerNombreMesa = (num, zona = zonaActiva) => {
-    const clave = `${zona}-${num}`
-    return nombresMesas[clave] || `Mesa ${num}`
-  }
+  const obtenerNombreMesa = (num) => nombresMesas[`${zonaActiva}-${num}`] || `Mesa ${num}`
 
-  // Añadir ítem a la BD inmediatamente
+  // AÑADIR PRODUCTO E INSERTAR EN BASE DE DATOS INSTANTÁNEAMENTE
   const agregarAlTicket = async (prod) => {
     try {
       let pId = pedidoIdActual
-      let mId = null
 
+      // Si no existe pedido abierto para la mesa, lo creamos
       if (!pId) {
         let { data: mesaBD } = await supabase
           .from('mesas')
@@ -251,36 +179,22 @@ export default function PdaView() {
           .eq('zona', zonaActiva)
           .maybeSingle()
 
-        if (mesaBD) {
-          mId = mesaBD.id
-        } else {
+        if (!mesaBD) {
           const { data: nuevaMesa } = await supabase
             .from('mesas')
             .insert([{ numero: mesaNum, zona: zonaActiva }])
             .select()
             .single()
-          if (nuevaMesa) mId = nuevaMesa.id
+          mesaBD = nuevaMesa
         }
 
-        const { data: pedidoExistente } = await supabase
+        const { data: nuevoPedido } = await supabase
           .from('pedidos')
-          .select('id')
-          .eq('mesa_id', mId)
-          .eq('estado', 'abierto')
-          .maybeSingle()
+          .insert([{ mesa_id: mesaBD.id, estado: 'abierto', nota: aliasActual }])
+          .select()
+          .single()
 
-        if (pedidoExistente) {
-          pId = pedidoExistente.id
-        } else {
-          const { data: nuevoPedido } = await supabase
-            .from('pedidos')
-            .insert([{ mesa_id: mId, estado: 'abierto', nota: aliasActual }])
-            .select()
-            .single()
-
-          if (nuevoPedido) pId = nuevoPedido.id
-        }
-
+        pId = nuevoPedido.id
         setPedidoIdActual(pId)
       }
 
@@ -298,193 +212,129 @@ export default function PdaView() {
             producto_nombre: prod.nombre,
             precio: prod.precio,
             cantidad: 1,
-            destino: prod.destino || 'barra',
+            destino: prod.destino, // 'barra' o 'cocina' según la DB
             estado: 'borrador',
           },
         ])
       }
+
+      // Refresco inmediato en la pantalla local de la PDA
+      await cargarPedidoMesaActual()
+      await cargarMesasOcupadas()
     } catch (err) {
-      console.error('Error añadiendo ítem:', err)
+      console.error('Error añadiendo producto:', err)
     }
   }
 
-  const cambiarCantidad = async (item, delta) => {
-    const nuevaCant = item.cantidad + delta
-    if (nuevaCant <= 0) {
-      await supabase.from('lineas_pedido').delete().eq('id', item.id_linea)
-    } else {
-      await supabase.from('lineas_pedido').update({ cantidad: nuevaCant }).eq('id', item.id_linea)
-    }
-  }
-
-  const liberarMesa = async (pedidoId, e) => {
-    if (e) e.stopPropagation()
-    if (!pedidoId) return
-    if (!confirm('¿Liberar esta mesa y cancelar su pedido actual?')) return
-
-    try {
-      await supabase.from('lineas_pedido').delete().eq('pedido_id', pedidoId)
-      await supabase.from('pedidos').update({ estado: 'cancelado' }).eq('id', pedidoId)
-    } catch (err) {
-      console.error('Error liberando mesa:', err)
-    }
-  }
-
+  // ENVIAR COMANDA A BARRA Y COCINA
   const enviarComandaBD = async () => {
     if (!pedidoIdActual) return
-
-    const borradores = comandaActual.filter((i) => i.estado === 'borrador')
-    if (borradores.length === 0) return
-
     setEnviando(true)
 
     try {
+      // Cambiar estado a 'pendiente' para que el TPV Central y la pantalla de Cocina lo procesen
       await supabase
         .from('lineas_pedido')
         .update({ estado: 'pendiente' })
         .eq('pedido_id', pedidoIdActual)
         .eq('estado', 'borrador')
 
-      if (aliasActual) {
-        await supabase
-          .from('pedidos')
-          .update({ nota: aliasActual })
-          .eq('id', pedidoIdActual)
-      }
-
+      await cargarPedidoMesaActual()
       setVerComandaMobile(false)
     } catch (err) {
-      alert(`❌ Error al enviar comanda: ${err.message}`)
+      alert(`Error enviando comanda: ${err.message}`)
     } finally {
       setEnviando(false)
     }
   }
 
-  const calcularTotal = () => comandaActual.reduce((sum, item) => sum + item.precio * item.cantidad, 0)
-  const tieneBorradores = comandaActual.some((i) => i.estado === 'borrador')
+  const productosFiltrados = productos.filter((p) => {
+    if (familiaActiva === 'TODOS') return true
+    return p.familia === familiaActiva
+  })
 
-  const productosFiltrados = productos.filter((p) => p.familia === familiaActiva)
-  const opcionesMesas = Array.from({ length: 20 }, (_, i) => i + 1)
+  const calcularTotal = () => comandaActual.reduce((s, i) => s + i.precio * i.cantidad, 0)
 
-  // VISTA LOGIN
   if (!usuario) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
-        <div className="w-full max-w-xs bg-slate-900 border border-slate-800 p-6 rounded-3xl shadow-2xl">
-          <div className="text-center mb-6">
-            <span className="text-4xl block mb-2">📲</span>
-            <h1 className="text-xl font-black text-amber-500 uppercase tracking-wider">PDA CAMARERO</h1>
-            <p className="text-xs text-slate-400 mt-1">Inicia sesión para comendar</p>
-          </div>
-
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Email</label>
-              <input
-                type="email"
-                required
-                placeholder="camarero@bar.com"
-                value={emailInput}
-                onChange={(e) => setEmailInput(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-amber-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Contraseña</label>
-              <input
-                type="password"
-                required
-                placeholder="••••••••"
-                value={passInput}
-                onChange={(e) => setPassInput(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-amber-500"
-              />
-            </div>
-
-            {errorLogin && <p className="text-xs text-rose-500 font-bold text-center">{errorLogin}</p>}
-
-            <button
-              type="submit"
-              disabled={cargandoAuth}
-              className="w-full py-3 bg-amber-500 text-slate-950 font-black text-xs uppercase rounded-xl shadow-lg active:scale-95 transition"
-            >
-              {cargandoAuth ? 'Ingresando...' : 'Entrar'}
-            </button>
-          </form>
-        </div>
+        <form
+          onSubmit={async (e) => {
+            e.preventDefault()
+            setCargandoAuth(true)
+            const { data, error } = await supabase.auth.signInWithPassword({ email: emailInput, password: passInput })
+            if (error) setErrorLogin('Error de credenciales')
+            else setUsuario(data.user)
+            setCargandoAuth(false)
+          }}
+          className="w-full max-w-xs bg-slate-900 border border-slate-800 p-6 rounded-3xl space-y-4"
+        >
+          <h1 className="text-xl font-black text-amber-500 text-center uppercase">PDA CAMARERO</h1>
+          <input
+            type="email"
+            placeholder="Email"
+            value={emailInput}
+            onChange={(e) => setEmailInput(e.target.value)}
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs"
+          />
+          <input
+            type="password"
+            placeholder="Contraseña"
+            value={passInput}
+            onChange={(e) => setPassInput(e.target.value)}
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs"
+          />
+          {errorLogin && <p className="text-xs text-rose-500 font-bold">{errorLogin}</p>}
+          <button type="submit" className="w-full py-3 bg-amber-500 text-slate-950 font-black text-xs uppercase rounded-xl">
+            {cargandoAuth ? 'Entrando...' : 'Iniciar Sesión'}
+          </button>
+        </form>
       </div>
     )
   }
 
-  // VISTA PRINCIPAL PDA
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-start">
-      <div className="w-full max-w-md min-h-screen flex flex-col bg-slate-950 border-x border-slate-800/50 relative pb-20">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center">
+      <div className="w-full max-w-md min-h-screen flex flex-col bg-slate-950 border-x border-slate-800/50 pb-20">
         
-        {/* HEADER SUPERIOR */}
-        <header className="bg-slate-900/90 backdrop-blur-md border-b border-slate-800 p-2.5 flex justify-between items-center sticky top-0 z-20">
+        {/* CABECERA Y SELECCIÓN DE MESA */}
+        <header className="bg-slate-900/90 border-b border-slate-800 p-3 flex justify-between items-center sticky top-0 z-20">
           <button
             type="button"
             onClick={() => setModalMesaAbierto(true)}
-            className="bg-amber-500/10 border border-amber-500/30 text-amber-400 font-black px-3 py-1.5 rounded-xl text-xs uppercase flex items-center gap-1.5 active:scale-95 transition"
+            className="bg-amber-500/10 border border-amber-500/30 text-amber-400 font-black px-3 py-1.5 rounded-xl text-xs uppercase"
           >
-            <span>📍 {zonaActiva} - {obtenerNombreMesa(mesaNum)}</span>
-            <span className="text-[10px]">▼</span>
+            📍 {zonaActiva} - {obtenerNombreMesa(mesaNum)} ▼
           </button>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={toggleFichaje}
-              className={`px-2.5 py-1.5 rounded-xl text-[10px] font-black uppercase transition border ${
-                fichado
-                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
-                  : 'bg-slate-800 text-slate-400 border-slate-700'
-              }`}
-            >
-              {fichado ? `⏰ ${horaFichaje}` : '⏹ Fichar'}
-            </button>
-
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="p-1.5 bg-slate-800 text-slate-400 rounded-xl border border-slate-700 active:scale-90"
-            >
-              🚪
-            </button>
-          </div>
+          <span className="text-xs font-bold text-slate-400">{usuario.email}</span>
         </header>
 
-        {/* INPUT NOTA / ALIAS DE LA MESA */}
-        <div className="p-2 bg-slate-900/40 border-b border-slate-800/60 flex items-center gap-2 px-3">
+        {/* ALIAS / NOTA */}
+        <div className="p-2 bg-slate-900/40 border-b border-slate-800 flex items-center gap-2 px-3">
           <span className="text-xs">👤</span>
           <input
             type="text"
-            placeholder="Nombre o nota (ej: Gorra roja)"
+            placeholder="Nota o Cliente (ej: Gorra negra)"
             value={aliasActual}
             onChange={async (e) => {
-              const val = e.target.value
-              setAliasActual(val)
+              setAliasActual(e.target.value)
               if (pedidoIdActual) {
-                await supabase.from('pedidos').update({ nota: val }).eq('id', pedidoIdActual)
+                await supabase.from('pedidos').update({ nota: e.target.value }).eq('id', pedidoIdActual)
               }
             }}
-            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-xs font-semibold text-amber-300 placeholder-slate-600 focus:outline-none focus:border-amber-500/50"
+            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-xs text-amber-300 focus:outline-none"
           />
         </div>
 
-        {/* SELECTOR DE FAMILIAS */}
-        <div className="flex gap-2 p-2 overflow-x-auto bg-slate-950 border-b border-slate-800/80 no-scrollbar">
+        {/* FAMILIAS */}
+        <div className="flex gap-2 p-2 overflow-x-auto bg-slate-950 border-b border-slate-800 no-scrollbar">
           {familias.map((f) => (
             <button
               key={f}
               type="button"
               onClick={() => setFamiliaActiva(f)}
-              className={`px-3.5 py-2 rounded-xl text-xs font-extrabold uppercase whitespace-nowrap transition cursor-pointer ${
-                familiaActiva === f
-                  ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/10'
-                  : 'bg-slate-900 text-slate-400 border border-slate-800'
+              className={`px-3 py-1.5 rounded-xl text-xs font-extrabold uppercase whitespace-nowrap ${
+                familiaActiva === f ? 'bg-amber-500 text-slate-950' : 'bg-slate-900 text-slate-400 border border-slate-800'
               }`}
             >
               {f}
@@ -492,242 +342,104 @@ export default function PdaView() {
           ))}
         </div>
 
-        {/* REJILLA DE PRODUCTOS */}
-        <div className="p-2.5 grid grid-cols-2 gap-2.5 flex-1 overflow-y-auto">
-          {productosFiltrados.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => agregarAlTicket(p)}
-              className="bg-slate-900 hover:bg-slate-850 border border-slate-800 active:border-amber-500 p-3 rounded-2xl flex flex-col justify-between h-24 active:scale-95 transition text-left cursor-pointer select-none"
-            >
-              <div className="flex justify-between items-start w-full">
-                <span className="font-bold text-xs text-slate-100 line-clamp-2 leading-tight">
-                  {p.nombre}
-                </span>
-                <span className="text-base leading-none">{p.img || '🍴'}</span>
-              </div>
-              <div className="flex justify-between items-end w-full border-t border-slate-800/80 pt-1.5">
-                <span className={`text-[9px] font-black uppercase tracking-wider ${p.destino === 'cocina' ? 'text-rose-400' : 'text-amber-400'}`}>
-                  {p.destino}
-                </span>
-                <span className="font-black text-xs text-amber-400">{Number(p.precio).toFixed(2)}€</span>
-              </div>
-            </button>
-          ))}
+        {/* REJILLA DE PRODUCTOS (FUNCIONAN AL TOCAR) */}
+        <div className="p-2.5 flex-1 overflow-y-auto">
+          {cargandoProductos ? (
+            <div className="text-center text-xs py-10 text-slate-500">Cargando la carta...</div>
+          ) : (
+            <div className="grid grid-cols-2 gap-2.5">
+              {productosFiltrados.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => agregarAlTicket(p)}
+                  className="bg-slate-900 hover:bg-slate-850 border border-slate-800 active:border-amber-500 p-3 rounded-2xl flex flex-col justify-between h-24 text-left active:scale-95 transition cursor-pointer"
+                >
+                  <div className="flex justify-between items-start w-full">
+                    <span className="font-bold text-xs text-slate-100 line-clamp-2">{p.nombre}</span>
+                    <span className="text-sm">{p.img || '🍴'}</span>
+                  </div>
+                  <div className="flex justify-between items-end w-full border-t border-slate-800/80 pt-1.5">
+                    <span className={`text-[9px] font-black uppercase ${p.destino === 'cocina' ? 'text-rose-400' : 'text-amber-400'}`}>
+                      {p.destino}
+                    </span>
+                    <span className="font-black text-xs text-amber-400">{Number(p.precio).toFixed(2)}€</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
-        {/* BARRA INFERIOR FIJA */}
-        <div className="fixed bottom-0 max-w-md w-full p-2.5 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 flex items-center gap-2 z-30">
+        {/* BARRA INFERIOR / ENVIAR COMANDA */}
+        <div className="fixed bottom-0 max-w-md w-full p-2.5 bg-slate-900 border-t border-slate-800 flex items-center gap-2 z-30">
           <button
             type="button"
             onClick={() => setVerComandaMobile(true)}
-            className="flex-1 bg-slate-950 border border-slate-800 px-3 py-2.5 rounded-2xl flex justify-between items-center active:scale-98 cursor-pointer"
+            className="flex-1 bg-slate-950 border border-slate-800 px-3 py-2.5 rounded-2xl flex justify-between items-center"
           >
-            <div className="flex items-center gap-2">
-              <span className="bg-amber-500 text-slate-950 font-black text-xs px-2 py-0.5 rounded-full">
-                {comandaActual.reduce((s, i) => s + i.cantidad, 0)}
-              </span>
-              <span className="text-xs font-bold text-slate-300">Ver Ticket</span>
-            </div>
+            <span className="bg-amber-500 text-slate-950 font-black text-xs px-2 py-0.5 rounded-full">
+              {comandaActual.reduce((s, i) => s + i.cantidad, 0)}
+            </span>
             <span className="font-black text-amber-400 text-xs">{calcularTotal().toFixed(2)}€</span>
           </button>
 
           <button
             type="button"
             onClick={enviarComandaBD}
-            disabled={!tieneBorradores || enviando}
-            className="bg-amber-500 disabled:opacity-30 text-slate-950 font-black px-4 py-3 rounded-2xl text-xs uppercase shadow-lg active:scale-95 transition cursor-pointer"
+            disabled={!comandaActual.some((i) => i.estado === 'borrador') || enviando}
+            className="bg-amber-500 disabled:opacity-30 text-slate-950 font-black px-4 py-3 rounded-2xl text-xs uppercase shadow-lg active:scale-95 transition"
           >
             {enviando ? '⏳...' : '🚀 ENVIAR'}
           </button>
         </div>
 
-        {/* MODAL DETALLE DE COMANDA */}
-        {verComandaMobile && (
-          <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-md z-50 flex flex-col p-4 max-w-md mx-auto">
-            <div className="flex justify-between items-center pb-3 border-b border-slate-800">
-              <div>
-                <h2 className="font-black text-amber-500 text-sm uppercase">
-                  {zonaActiva} — {obtenerNombreMesa(mesaNum)}
-                </h2>
-                {aliasActual && <p className="text-xs text-amber-300 font-bold">👤 {aliasActual}</p>}
-              </div>
-              <button
-                type="button"
-                onClick={() => setVerComandaMobile(false)}
-                className="w-8 h-8 bg-slate-800 text-slate-300 font-bold rounded-full flex items-center justify-center active:scale-90"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto py-3 space-y-2">
-              {comandaActual.length === 0 ? (
-                <p className="text-center text-slate-500 text-xs py-10">Mesa sin consumiciones añadidas.</p>
-              ) : (
-                comandaActual.map((item) => (
-                  <div
-                    key={item.id_linea}
-                    className="bg-slate-900 border border-slate-800 p-2.5 rounded-2xl flex justify-between items-center"
-                  >
-                    <div className="max-w-[45%]">
-                      <span className="font-bold text-xs text-slate-100 block truncate">{item.nombre}</span>
-                      <span className="text-[10px] text-slate-400 flex items-center gap-1">
-                        {item.precio.toFixed(2)}€/ud — 
-                        <span className={`uppercase font-bold ${item.estado === 'borrador' ? 'text-amber-400' : 'text-emerald-400'}`}>
-                          {item.estado === 'borrador' ? 'Sin Enviar' : 'Enviado'}
-                        </span>
-                        <span className={`text-[8px] px-1 rounded uppercase ${item.destino === 'cocina' ? 'bg-rose-900/50 text-rose-300' : 'bg-blue-900/50 text-blue-300'}`}>
-                          {item.destino}
-                        </span>
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 p-1 rounded-xl">
-                        <button
-                          type="button"
-                          onClick={() => cambiarCantidad(item, -1)}
-                          className="w-6 h-6 bg-rose-500/20 text-rose-400 font-black rounded-lg text-xs flex items-center justify-center active:scale-90"
-                        >
-                          -
-                        </button>
-                        <span className="font-black text-xs px-1">{item.cantidad}</span>
-                        <button
-                          type="button"
-                          onClick={() => cambiarCantidad(item, 1)}
-                          className="w-6 h-6 bg-emerald-500/20 text-emerald-400 font-black rounded-lg text-xs flex items-center justify-center active:scale-90"
-                        >
-                          +
-                        </button>
-                      </div>
-                      <span className="font-black text-xs text-amber-400 w-12 text-right">
-                        {(item.precio * item.cantidad).toFixed(2)}€
-                      </span>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-
-            <div className="pt-3 border-t border-slate-800 space-y-2">
-              <div className="flex justify-between items-center text-sm font-black">
-                <span>TOTAL ACUMULADO</span>
-                <span className="text-amber-400 text-lg">{calcularTotal().toFixed(2)}€</span>
-              </div>
-              
-              <div className="flex gap-2">
-                {pedidoIdActual && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      liberarMesa(pedidoIdActual, e)
-                      setVerComandaMobile(false)
-                    }}
-                    className="py-3.5 px-4 bg-rose-500/20 border border-rose-500/40 text-rose-400 font-bold text-xs uppercase rounded-2xl active:scale-95 transition"
-                  >
-                    🗑️ Vaciar
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={enviarComandaBD}
-                  disabled={!tieneBorradores || enviando}
-                  className="flex-1 py-3.5 bg-amber-500 disabled:opacity-30 text-slate-950 font-black text-xs uppercase rounded-2xl shadow-xl active:scale-95 transition"
-                >
-                  {enviando ? 'ENVIANDO...' : '🚀 ENVIAR A COCINA / BARRA'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* MODAL SELECTOR DE MESA */}
+        {/* MODAL MESA */}
         {modalMesaAbierto && (
-          <div className="fixed inset-0 bg-slate-950/95 z-50 p-4 flex flex-col justify-between max-w-md mx-auto">
-            <div>
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="font-black text-amber-500 text-xs uppercase">Seleccionar Ubicación</h2>
+          <div className="fixed inset-0 bg-slate-950 z-50 p-4 flex flex-col max-w-md mx-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="font-black text-amber-500 text-xs uppercase">Seleccionar Ubicación</h2>
+              <button type="button" onClick={() => setModalMesaAbierto(false)} className="text-lg">✕</button>
+            </div>
+            <div className="flex gap-1.5 mb-4">
+              {['Terraza', 'Salón', 'Barra'].map((z) => (
                 <button
+                  key={z}
                   type="button"
-                  onClick={() => setModalMesaAbierto(false)}
-                  className="w-8 h-8 bg-slate-800 text-slate-300 font-bold rounded-full flex items-center justify-center active:scale-90"
+                  onClick={() => setZonaActiva(z)}
+                  className={`flex-1 py-2 rounded-xl text-xs font-black uppercase ${
+                    zonaActiva === z ? 'bg-amber-500 text-slate-950' : 'bg-slate-900 text-slate-400'
+                  }`}
                 >
-                  ✕
+                  {z}
                 </button>
-              </div>
-
-              {/* PESTAÑAS ZONAS */}
-              <div className="flex gap-1.5 mb-4">
-                {['Terraza', 'Salón', 'Barra'].map((z) => (
+              ))}
+            </div>
+            <div className="grid grid-cols-3 gap-2 overflow-y-auto">
+              {Array.from({ length: 20 }, (_, i) => i + 1).map((n) => {
+                const clave = `${zonaActiva}-${n}`
+                const estaOcupada = Boolean(mesasOcupadasMap[clave])
+                return (
                   <button
-                    key={z}
+                    key={n}
                     type="button"
-                    onClick={() => setZonaActiva(z)}
-                    className={`flex-1 py-2 rounded-xl text-xs font-black uppercase transition ${
-                      zonaActiva === z ? 'bg-amber-500 text-slate-950 shadow-md' : 'bg-slate-900 text-slate-400 border border-slate-800'
+                    onClick={() => {
+                      setMesaNum(n)
+                      setModalMesaAbierto(false)
+                    }}
+                    className={`p-3 rounded-2xl border text-center flex flex-col justify-between items-center h-20 ${
+                      mesaNum === n
+                        ? 'bg-amber-500 text-slate-950 font-black'
+                        : estaOcupada
+                        ? 'bg-rose-950/40 border-rose-600/60 text-rose-200'
+                        : 'bg-emerald-950/30 border-emerald-600/40 text-emerald-300'
                     }`}
                   >
-                    {z}
+                    <span className="text-[10px] font-black uppercase">{obtenerNombreMesa(n)}</span>
+                    <span className="text-[9px] uppercase font-bold">{estaOcupada ? 'Ocupada' : 'Libre'}</span>
                   </button>
-                ))}
-              </div>
-
-              {/* REJILLA MESAS */}
-              <div className="grid grid-cols-3 gap-2 max-h-[65vh] overflow-y-auto p-1">
-                {opcionesMesas.map((n) => {
-                  const clave = `${zonaActiva}-${n}`
-                  const mesaInfo = mesasOcupadasMap[clave]
-                  const estaOcupada = Boolean(mesaInfo)
-                  const esSeleccionada = mesaNum === n
-                  const nombreVisual = obtenerNombreMesa(n)
-
-                  return (
-                    <div
-                      key={n}
-                      onClick={() => {
-                        setMesaNum(n)
-                        setModalMesaAbierto(false)
-                      }}
-                      className={`p-2 rounded-2xl border text-center flex flex-col justify-between items-center h-20 transition active:scale-95 cursor-pointer relative ${
-                        esSeleccionada
-                          ? 'ring-2 ring-amber-400 bg-amber-500 text-slate-950 font-black'
-                          : estaOcupada
-                          ? 'bg-rose-950/40 border-rose-600/60 text-rose-200'
-                          : 'bg-emerald-950/30 border-emerald-600/40 text-emerald-300'
-                      }`}
-                    >
-                      <span className="text-[10px] font-black uppercase leading-tight line-clamp-1">
-                        {nombreVisual}
-                      </span>
-
-                      <span className="text-[11px] font-black">
-                        {estaOcupada ? `${mesaInfo.total.toFixed(2)}€` : 'Libre'}
-                      </span>
-
-                      <div className="flex items-center gap-1 w-full justify-center">
-                        <span
-                          className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-md ${
-                            estaOcupada ? 'bg-rose-600 text-white' : 'bg-emerald-600/40 text-emerald-200'
-                          }`}
-                        >
-                          {estaOcupada ? 'Ocupada' : 'Disponible'}
-                        </span>
-                        {estaOcupada && (
-                          <button
-                            type="button"
-                            title="Liberar Mesa"
-                            onClick={(e) => liberarMesa(mesaInfo.pedidoId, e)}
-                            className="bg-rose-900/80 hover:bg-rose-700 text-white text-[9px] p-0.5 px-1 rounded border border-rose-500/50"
-                          >
-                            🗑️
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
+                )
+              })}
             </div>
           </div>
         )}
