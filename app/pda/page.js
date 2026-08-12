@@ -35,7 +35,7 @@ export default function PdaView() {
   const [modalMesaAbierto, setModalMesaAbierto] = useState(false)
   const [verComandaMobile, setVerComandaMobile] = useState(false)
 
-  // 1. Comprobar sesión activa de Supabase
+  // 1. Comprobar sesión activa
   useEffect(() => {
     const checkSession = async () => {
       const { data: { session } } = await supabase.auth.getSession()
@@ -44,45 +44,33 @@ export default function PdaView() {
     checkSession()
   }, [])
 
-  // 2. Cargar datos iniciales y listeners Globales
+  // 2. Cargar datos iniciales
   useEffect(() => {
     cargarProductos()
     cargarNombresMesas()
     cargarMesasOcupadas()
+  }, [])
 
-    const channelMesas = supabase
-      .channel('mesas-pda-realtime')
+  // 3. SUSCRIPCIÓN EN TIEMPO REAL GLOBAL (Mesas, Pedidos y Líneas)
+  // Sincroniza lo que ocurra en el TPV Central o en cualquier otra PDA
+  useEffect(() => {
+    const channelGlobal = supabase
+      .channel('tpv-pda-sync-global')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mesas' }, () => {
         cargarNombresMesas()
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, () => {
         cargarMesasOcupadas()
+        cargarPedidoMesaActual()
       })
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(channelMesas)
-    }
-  }, [])
-
-  // 3. Sincronizar el pedido de la mesa activa en tiempo real
-  useEffect(() => {
-    cargarPedidoMesaActual()
-
-    const channelPedidoActivo = supabase
-      .channel('pedido-activo-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'lineas_pedido' }, () => {
-        cargarPedidoMesaActual()
         cargarMesasOcupadas()
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, () => {
         cargarPedidoMesaActual()
-        cargarMesasOcupadas()
       })
       .subscribe()
 
     return () => {
-      supabase.removeChannel(channelPedidoActivo)
+      supabase.removeChannel(channelGlobal)
     }
   }, [zonaActiva, mesaNum])
 
@@ -177,7 +165,6 @@ export default function PdaView() {
           const clave = `${p.mesas.zona}-${p.mesas.numero}`
           const totalMesa = p.lineas_pedido?.reduce((sum, l) => sum + Number(l.precio) * l.cantidad, 0) || 0
           
-          // Solo se considera ocupada si tiene consumiciones y su importe es mayor a 0
           if (totalMesa > 0 && p.lineas_pedido && p.lineas_pedido.length > 0) {
             ocupadas[clave] = { pedidoId: p.id, total: totalMesa }
           }
@@ -250,6 +237,7 @@ export default function PdaView() {
     return nombresMesas[clave] || `Mesa ${num}`
   }
 
+  // Añadir ítem a la BD inmediatamente
   const agregarAlTicket = async (prod) => {
     try {
       let pId = pedidoIdActual
@@ -315,9 +303,6 @@ export default function PdaView() {
           },
         ])
       }
-
-      await cargarPedidoMesaActual()
-      await cargarMesasOcupadas()
     } catch (err) {
       console.error('Error añadiendo ítem:', err)
     }
@@ -330,11 +315,8 @@ export default function PdaView() {
     } else {
       await supabase.from('lineas_pedido').update({ cantidad: nuevaCant }).eq('id', item.id_linea)
     }
-    await cargarPedidoMesaActual()
-    await cargarMesasOcupadas()
   }
 
-  // Liberar / Vaciar Mesa
   const liberarMesa = async (pedidoId, e) => {
     if (e) e.stopPropagation()
     if (!pedidoId) return
@@ -343,9 +325,6 @@ export default function PdaView() {
     try {
       await supabase.from('lineas_pedido').delete().eq('pedido_id', pedidoId)
       await supabase.from('pedidos').update({ estado: 'cancelado' }).eq('id', pedidoId)
-
-      await cargarPedidoMesaActual()
-      await cargarMesasOcupadas()
     } catch (err) {
       console.error('Error liberando mesa:', err)
     }
@@ -374,8 +353,6 @@ export default function PdaView() {
       }
 
       setVerComandaMobile(false)
-      await cargarPedidoMesaActual()
-      await cargarMesasOcupadas()
     } catch (err) {
       alert(`❌ Error al enviar comanda: ${err.message}`)
     } finally {
@@ -440,7 +417,7 @@ export default function PdaView() {
     )
   }
 
-  // VISTA PRINCIPAL PDA MÓVIL
+  // VISTA PRINCIPAL PDA
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-start">
       <div className="w-full max-w-md min-h-screen flex flex-col bg-slate-950 border-x border-slate-800/50 relative pb-20">
@@ -479,19 +456,25 @@ export default function PdaView() {
           </div>
         </header>
 
-        {/* INPUT NOTA O CLIENTE */}
+        {/* INPUT NOTA / ALIAS DE LA MESA */}
         <div className="p-2 bg-slate-900/40 border-b border-slate-800/60 flex items-center gap-2 px-3">
           <span className="text-xs">👤</span>
           <input
             type="text"
             placeholder="Nombre o nota (ej: Gorra roja)"
             value={aliasActual}
-            onChange={(e) => setAliasActual(e.target.value)}
+            onChange={async (e) => {
+              const val = e.target.value
+              setAliasActual(val)
+              if (pedidoIdActual) {
+                await supabase.from('pedidos').update({ nota: val }).eq('id', pedidoIdActual)
+              }
+            }}
             className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-xs font-semibold text-amber-300 placeholder-slate-600 focus:outline-none focus:border-amber-500/50"
           />
         </div>
 
-        {/* SELECTOR DE FAMILIAS (HORIZONTAL SCROLL) */}
+        {/* SELECTOR DE FAMILIAS */}
         <div className="flex gap-2 p-2 overflow-x-auto bg-slate-950 border-b border-slate-800/80 no-scrollbar">
           {familias.map((f) => (
             <button
@@ -601,29 +584,23 @@ export default function PdaView() {
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
-                      {item.estado === 'borrador' ? (
-                        <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 p-1 rounded-xl">
-                          <button
-                            type="button"
-                            onClick={() => cambiarCantidad(item, -1)}
-                            className="w-6 h-6 bg-rose-500/20 text-rose-400 font-black rounded-lg text-xs flex items-center justify-center active:scale-90"
-                          >
-                            -
-                          </button>
-                          <span className="font-black text-xs px-1">{item.cantidad}</span>
-                          <button
-                            type="button"
-                            onClick={() => cambiarCantidad(item, 1)}
-                            className="w-6 h-6 bg-emerald-500/20 text-emerald-400 font-black rounded-lg text-xs flex items-center justify-center active:scale-90"
-                          >
-                            +
-                          </button>
-                        </div>
-                      ) : (
-                        <span className="text-xs font-bold text-slate-400 px-2 py-1 bg-slate-950 rounded-lg">
-                          x{item.cantidad}
-                        </span>
-                      )}
+                      <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 p-1 rounded-xl">
+                        <button
+                          type="button"
+                          onClick={() => cambiarCantidad(item, -1)}
+                          className="w-6 h-6 bg-rose-500/20 text-rose-400 font-black rounded-lg text-xs flex items-center justify-center active:scale-90"
+                        >
+                          -
+                        </button>
+                        <span className="font-black text-xs px-1">{item.cantidad}</span>
+                        <button
+                          type="button"
+                          onClick={() => cambiarCantidad(item, 1)}
+                          className="w-6 h-6 bg-emerald-500/20 text-emerald-400 font-black rounded-lg text-xs flex items-center justify-center active:scale-90"
+                        >
+                          +
+                        </button>
+                      </div>
                       <span className="font-black text-xs text-amber-400 w-12 text-right">
                         {(item.precio * item.cantidad).toFixed(2)}€
                       </span>
