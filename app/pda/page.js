@@ -14,13 +14,13 @@ export default function PdaView() {
   const [fichado, setFichado] = useState(false)
   const [horaFichaje, setHoraFichaje] = useState(null)
 
-  // Modales adicionales
+  // Modales
   const [modalStockAbierto, setModalStockAbierto] = useState(false)
   const [modalTurnosAbierto, setModalTurnosAbierto] = useState(false)
   const [faltaTextoManual, setFaltaTextoManual] = useState('')
   const [listaFaltas, setListaFaltas] = useState([])
 
-  // Turnos de trabajo
+  // Turnos
   const [turnos, setTurnos] = useState({
     'Viernes Noche': [],
     'Sábado Mañana': [],
@@ -37,20 +37,21 @@ export default function PdaView() {
   const [productos, setProductos] = useState([])
   const [familias, setFamilias] = useState([])
   const [familiaActiva, setFamiliaActiva] = useState('')
-  const [comandasPorMesa, setComandasPorMesa] = useState({})
-  const [aliasPorMesa, setAliasPorMesa] = useState({})
+  
+  // Estado global de comandas sincronizadas
+  const [comandaActual, setComandaActual] = useState([])
+  const [pedidoIdActual, setPedidoIdActual] = useState(null)
+  const [aliasActual, setAliasActual] = useState('')
+  
   const [modalMesaAbierto, setModalMesaAbierto] = useState(false)
   const [verComandaMobile, setVerComandaMobile] = useState(false)
 
-  const claveMesaActual = `${zonaActiva}-${mesaNum}`
-  const comandaActual = comandasPorMesa[claveMesaActual] || []
-  const aliasActual = aliasPorMesa[claveMesaActual] || ''
-
+  // Carga inicial
   useEffect(() => {
     cargarProductos()
     cargarNombresMesas()
 
-    const channel = supabase
+    const channelMesas = supabase
       .channel('mesas-pda-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mesas' }, () => {
         cargarNombresMesas()
@@ -58,9 +59,28 @@ export default function PdaView() {
       .subscribe()
 
     return () => {
-      supabase.removeChannel(channel)
+      supabase.removeChannel(channelMesas)
     }
   }, [])
+
+  // Sincronización en tiempo real del pedido de la mesa seleccionada
+  useEffect(() => {
+    cargarPedidoMesaActual()
+
+    const channelPedidos = supabase
+      .channel('lineas-pda-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'lineas_pedido' }, () => {
+        cargarPedidoMesaActual()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, () => {
+        cargarPedidoMesaActual()
+      })
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channelPedidos)
+    }
+  }, [zonaActiva, mesaNum])
 
   const handleLogin = (e) => {
     e.preventDefault()
@@ -90,43 +110,6 @@ export default function PdaView() {
       alert(`🛑 Salida fichada. Entrada previa: ${horaFichaje}`)
       setHoraFichaje(null)
     }
-  }
-
-  const toggleFaltaProducto = (nombreProd) => {
-    if (listaFaltas.includes(nombreProd)) {
-      setListaFaltas(listaFaltas.filter((item) => item !== nombreProd))
-    } else {
-      setListaFaltas([...listaFaltas, nombreProd])
-    }
-  }
-
-  const agregarFaltaManual = () => {
-    if (faltaTextoManual.trim()) {
-      setListaFaltas([...listaFaltas, faltaTextoManual.trim()])
-      setFaltaTextoManual('')
-    }
-  }
-
-  const enviarAvisoJefes = () => {
-    if (listaFaltas.length === 0) return
-    alert(`📩 Aviso enviado a los jefes:\nFaltas acumuladas:\n- ${listaFaltas.join('\n- ')}`)
-    setListaFaltas([])
-    setModalStockAbierto(false)
-  }
-
-  const toggleApuntarseTurno = (turnoNombre) => {
-    if (!usuario) return
-    const listaActual = turnos[turnoNombre] || []
-    const yaApuntado = listaActual.includes(usuario.nombre)
-
-    let nuevaLista = []
-    if (yaApuntado) {
-      nuevaLista = listaActual.filter((n) => n !== usuario.nombre)
-    } else {
-      nuevaLista = [...listaActual, usuario.nombre]
-    }
-
-    setTurnos({ ...turnos, [turnoNombre]: nuevaLista })
   }
 
   const cargarProductos = async () => {
@@ -159,122 +142,168 @@ export default function PdaView() {
     }
   }
 
+  // Carga el pedido activo de la mesa desde la base de datos
+  const cargarPedidoMesaActual = async () => {
+    try {
+      const { data: mesa } = await supabase
+        .from('mesas')
+        .select('id')
+        .eq('zona', zonaActiva)
+        .eq('numero', mesaNum)
+        .maybeSingle()
+
+      if (!mesa) {
+        setComandaActual([])
+        setPedidoIdActual(null)
+        setAliasActual('')
+        return
+      }
+
+      const { data: pedido } = await supabase
+        .from('pedidos')
+        .select('id, nota')
+        .eq('mesa_id', mesa.id)
+        .eq('estado', 'abierto')
+        .maybeSingle()
+
+      if (!pedido) {
+        setComandaActual([])
+        setPedidoIdActual(null)
+        setAliasActual('')
+        return
+      }
+
+      setPedidoIdActual(pedido.id)
+      setAliasActual(pedido.nota || '')
+
+      const { data: lineas } = await supabase
+        .from('lineas_pedido')
+        .select('*')
+        .eq('pedido_id', pedido.id)
+
+      if (lineas) {
+        setComandaActual(
+          lineas.map((l) => ({
+            id_linea: l.id,
+            nombre: l.producto_nombre,
+            precio: Number(l.precio),
+            cantidad: l.cantidad,
+            destino: l.destino,
+            estado: l.estado,
+          }))
+        )
+      }
+    } catch (err) {
+      console.error('Error cargando pedido de la mesa:', err)
+    }
+  }
+
   const obtenerNombreMesa = (num, zona = zonaActiva) => {
     const clave = `${zona}-${num}`
     return nombresMesas[clave] || `Mesa ${num}`
   }
 
-  const renombrarMesa = async (num, e) => {
-    e.stopPropagation()
-    const nombreActual = obtenerNombreMesa(num)
-    const nuevoNombre = prompt(`Nuevo nombre para ${zonaActiva} - ${nombreActual}:`, nombreActual)
+  // Agregar producto directamente a la BD
+  const agregarAlTicket = async (prod) => {
+    try {
+      let pId = pedidoIdActual
+      let mId = null
 
-    if (nuevoNombre !== null) {
-      const nombreLimpio = nuevoNombre.trim()
-      const clave = `${zonaActiva}-${num}`
-
-      setNombresMesas((prev) => ({
-        ...prev,
-        [clave]: nombreLimpio || `Mesa ${num}`,
-      }))
-
-      try {
-        const { data: mesaExistente } = await supabase
+      if (!pId) {
+        const { data: mesaBD } = await supabase
           .from('mesas')
           .select('id')
+          .eq('numero', mesaNum)
           .eq('zona', zonaActiva)
-          .eq('numero', num)
           .maybeSingle()
 
-        if (mesaExistente) {
-          await supabase.from('mesas').update({ nombre_custom: nombreLimpio }).eq('id', mesaExistente.id)
+        if (mesaBD) {
+          mId = mesaBD.id
         } else {
-          await supabase.from('mesas').insert([{ zona: zonaActiva, numero: num, nombre_custom: nombreLimpio }])
+          const { data: nuevaMesa } = await supabase
+            .from('mesas')
+            .insert([{ numero: mesaNum, zona: zonaActiva }])
+            .select()
+            .single()
+          if (nuevaMesa) mId = nuevaMesa.id
         }
-      } catch (err) {
-        console.error('Error guardando nombre:', err)
+
+        const { data: nuevoPedido } = await supabase
+          .from('pedidos')
+          .insert([{ mesa_id: mId, estado: 'abierto', nota: aliasActual }])
+          .select()
+          .single()
+
+        if (nuevoPedido) {
+          pId = nuevoPedido.id
+          setPedidoIdActual(pId)
+        }
       }
+
+      const itemExistente = comandaActual.find((i) => i.nombre === prod.nombre && i.estado === 'borrador')
+
+      if (itemExistente) {
+        await supabase
+          .from('lineas_pedido')
+          .update({ cantidad: itemExistente.cantidad + 1 })
+          .eq('id', itemExistente.id_linea)
+      } else {
+        await supabase.from('lineas_pedido').insert([
+          {
+            pedido_id: pId,
+            producto_nombre: prod.nombre,
+            precio: prod.precio,
+            cantidad: 1,
+            destino: prod.destino || 'barra',
+            estado: 'borrador',
+          },
+        ])
+      }
+
+      cargarPedidoMesaActual()
+    } catch (err) {
+      console.error('Error añadiendo ítem:', err)
     }
   }
 
-  const agregarAlTicket = (prod) => {
-    const actual = comandasPorMesa[claveMesaActual] || []
-    const existe = actual.find((i) => i.id === prod.id)
+  const cambiarCantidad = async (item, delta) => {
+    const nuevaCant = item.cantidad + delta
 
-    let nuevaComanda = []
-    if (existe) {
-      nuevaComanda = actual.map((i) => (i.id === prod.id ? { ...i, cantidad: i.cantidad + 1 } : i))
+    if (nuevaCant <= 0) {
+      await supabase.from('lineas_pedido').delete().eq('id', item.id_linea)
     } else {
-      nuevaComanda = [...actual, { ...prod, cantidad: 1 }]
+      await supabase.from('lineas_pedido').update({ cantidad: nuevaCant }).eq('id', item.id_linea)
     }
 
-    setComandasPorMesa({ ...comandasPorMesa, [claveMesaActual]: nuevaComanda })
+    cargarPedidoMesaActual()
   }
 
-  const cambiarCantidad = (id, delta) => {
-    const actual = comandasPorMesa[claveMesaActual] || []
-    const nuevaComanda = actual
-      .map((i) => (i.id === id ? { ...i, cantidad: i.cantidad + delta } : i))
-      .filter((i) => i.cantidad > 0)
+  // Cambia el estado de los borradores a 'pendiente' para que aparezcan en Barra/Cocina
+  const enviarComandaBD = async () => {
+    if (!pedidoIdActual || comandaActual.length === 0) return
 
-    setComandasPorMesa({ ...comandasPorMesa, [claveMesaActual]: nuevaComanda })
+    try {
+      await supabase
+        .from('lineas_pedido')
+        .update({ estado: 'pendiente' })
+        .eq('pedido_id', pedidoIdActual)
+        .eq('estado', 'borrador')
+
+      await supabase
+        .from('pedidos')
+        .update({ nota: aliasActual })
+        .eq('id', pedidoIdActual)
+
+      alert('🚀 ¡Comanda enviada a barra, cocina y TPV central!')
+      setVerComandaMobile(false)
+      cargarPedidoMesaActual()
+    } catch (err) {
+      alert(`❌ Error al enviar: ${err.message}`)
+    }
   }
 
   const calcularTotal = () => {
-    return comandaActual.reduce((sum, item) => sum + Number(item.precio) * item.cantidad, 0)
-  }
-
-  const enviarComandaBD = async () => {
-    if (comandaActual.length === 0) return
-
-    try {
-      let mesaId = null
-      const { data: mesaBD } = await supabase
-        .from('mesas')
-        .select('id')
-        .eq('numero', mesaNum)
-        .eq('zona', zonaActiva)
-        .maybeSingle()
-
-      if (mesaBD) {
-        mesaId = mesaBD.id
-      } else {
-        const { data: nuevaMesa } = await supabase
-          .from('mesas')
-          .insert([{ numero: mesaNum, zona: zonaActiva }])
-          .select()
-          .single()
-        if (nuevaMesa) mesaId = nuevaMesa.id
-      }
-
-      const { data: pedido } = await supabase
-        .from('pedidos')
-        .insert([{ mesa_id: mesaId, estado: 'abierto', nota: aliasActual }])
-        .select()
-        .single()
-
-      if (pedido) {
-        const lineas = comandaActual.map((item) => ({
-          pedido_id: pedido.id,
-          producto_nombre: item.nombre,
-          precio: item.precio,
-          cantidad: item.cantidad,
-          destino: item.destino || 'barra',
-          estado: 'pendiente',
-        }))
-        await supabase.from('lineas_pedido').insert(lineas)
-      }
-
-      // Limpiar ticket local tras enviar
-      const copComandas = { ...comandasPorMesa }
-      delete copComandas[claveMesaActual]
-      setComandasPorMesa(copComandas)
-
-      alert(`✅ ¡Comanda enviada a la pantalla principal!`)
-      setVerComandaMobile(false)
-    } catch (err) {
-      alert(`❌ Error al enviar: ${err.message || 'Sin conexión'}`)
-    }
+    return comandaActual.reduce((sum, item) => sum + item.precio * item.cantidad, 0)
   }
 
   const productosFiltrados = productos.filter((p) => p.familia === familiaActiva)
@@ -329,7 +358,6 @@ export default function PdaView() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none pb-20">
-      
       {/* BARRA SUPERIOR */}
       <header className="bg-slate-900 border-b border-slate-800 p-3 flex justify-between items-center sticky top-0 z-30">
         <button
@@ -381,7 +409,7 @@ export default function PdaView() {
           type="text"
           placeholder="Nombre o descripción (ej: Gorra roja)"
           value={aliasActual}
-          onChange={(e) => setAliasPorMesa({ ...aliasPorMesa, [claveMesaActual]: e.target.value })}
+          onChange={(e) => setAliasActual(e.target.value)}
           className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1 text-xs font-bold text-amber-300 placeholder-slate-600 focus:outline-none"
         />
       </div>
@@ -471,24 +499,26 @@ export default function PdaView() {
             ) : (
               comandaActual.map((item) => (
                 <div
-                  key={item.id}
+                  key={item.id_linea}
                   className="bg-slate-900 border border-slate-800 p-3 rounded-2xl flex justify-between items-center"
                 >
                   <div>
                     <span className="font-bold text-xs text-slate-100 block">{item.nombre}</span>
-                    <span className="text-[10px] text-slate-400">{Number(item.precio).toFixed(2)}€ / ud</span>
+                    <span className="text-[10px] text-slate-400">
+                      {item.precio.toFixed(2)}€ / ud — <span className="uppercase text-amber-500">{item.estado}</span>
+                    </span>
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 p-1 rounded-xl">
                       <button
-                        onClick={() => cambiarCantidad(item.id, -1)}
+                        onClick={() => cambiarCantidad(item, -1)}
                         className="w-6 h-6 bg-rose-500/20 text-rose-400 font-black rounded-lg text-xs"
                       >
                         -
                       </button>
                       <span className="font-black text-xs px-2">{item.cantidad}</span>
                       <button
-                        onClick={() => cambiarCantidad(item.id, 1)}
+                        onClick={() => cambiarCantidad(item, 1)}
                         className="w-6 h-6 bg-emerald-500/20 text-emerald-400 font-black rounded-lg text-xs"
                       >
                         +
@@ -513,7 +543,7 @@ export default function PdaView() {
               disabled={comandaActual.length === 0}
               className="w-full py-4 bg-amber-500 disabled:opacity-30 text-slate-950 font-black text-sm uppercase rounded-2xl shadow-xl active:scale-95 transition"
             >
-              🚀 ENVIAR A TPV PRINCIPAL
+              🚀 ENVIAR A COCINA / BARRA
             </button>
           </div>
         </div>
@@ -565,12 +595,6 @@ export default function PdaView() {
                     }`}
                   >
                     <span className="text-xs uppercase leading-tight line-clamp-2">{nombreVisual}</span>
-                    <button
-                      onClick={(e) => renombrarMesa(n, e)}
-                      className="absolute top-1 right-1 text-[10px] opacity-60 hover:opacity-100 p-1"
-                    >
-                      ✏️
-                    </button>
                   </div>
                 )
               })}
@@ -599,7 +623,10 @@ export default function PdaView() {
                 return (
                   <button
                     key={p.id}
-                    onClick={() => toggleFaltaProducto(p.nombre)}
+                    onClick={() => {
+                      if (marcado) setListaFaltas(listaFaltas.filter((i) => i !== p.nombre))
+                      else setListaFaltas([...listaFaltas, p.nombre])
+                    }}
                     className={`p-2.5 rounded-xl border text-left text-xs font-bold transition ${
                       marcado
                         ? 'bg-rose-500/20 border-rose-500 text-rose-300'
@@ -620,14 +647,27 @@ export default function PdaView() {
                 onChange={(e) => setFaltaTextoManual(e.target.value)}
                 className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100"
               />
-              <button onClick={agregarFaltaManual} className="bg-slate-800 px-3 py-2 rounded-xl text-xs font-bold">
+              <button
+                onClick={() => {
+                  if (faltaTextoManual.trim()) {
+                    setListaFaltas([...listaFaltas, faltaTextoManual.trim()])
+                    setFaltaTextoManual('')
+                  }
+                }}
+                className="bg-slate-800 px-3 py-2 rounded-xl text-xs font-bold"
+              >
                 +
               </button>
             </div>
           </div>
 
           <button
-            onClick={enviarAvisoJefes}
+            onClick={() => {
+              if (listaFaltas.length === 0) return
+              alert(`📩 Aviso enviado a los jefes:\nFaltas acumuladas:\n- ${listaFaltas.join('\n- ')}`)
+              setListaFaltas([])
+              setModalStockAbierto(false)
+            }}
             disabled={listaFaltas.length === 0}
             className="w-full py-3.5 bg-rose-600 disabled:opacity-30 text-white font-black text-xs uppercase rounded-xl shadow-lg"
           >
@@ -665,7 +705,12 @@ export default function PdaView() {
                     </div>
 
                     <button
-                      onClick={() => toggleApuntarseTurno(t)}
+                      onClick={() => {
+                        const lista = turnos[t] || []
+                        const existe = lista.includes(usuario.nombre)
+                        const nueva = existe ? lista.filter((n) => n !== usuario.nombre) : [...lista, usuario.nombre]
+                        setTurnos({ ...turnos, [t]: nueva })
+                      }}
                       className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase transition ${
                         yoApuntado
                           ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40'
@@ -681,7 +726,6 @@ export default function PdaView() {
           </div>
         </div>
       )}
-
     </div>
   )
 }
