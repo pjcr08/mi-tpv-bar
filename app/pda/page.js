@@ -65,7 +65,7 @@ export default function PdaView() {
     }
   }, [])
 
-  // 3. Sincronizar el pedido de la mesa activa en tiempo real al cambiar de zona o mesa
+  // 3. Sincronizar el pedido de la mesa activa en tiempo real
   useEffect(() => {
     cargarPedidoMesaActual()
 
@@ -176,7 +176,11 @@ export default function PdaView() {
         if (p.mesas) {
           const clave = `${p.mesas.zona}-${p.mesas.numero}`
           const totalMesa = p.lineas_pedido?.reduce((sum, l) => sum + Number(l.precio) * l.cantidad, 0) || 0
-          ocupadas[clave] = { pedidoId: p.id, total: totalMesa }
+          
+          // Solo se considera ocupada si tiene consumiciones y su importe es mayor a 0
+          if (totalMesa > 0 && p.lineas_pedido && p.lineas_pedido.length > 0) {
+            ocupadas[clave] = { pedidoId: p.id, total: totalMesa }
+          }
         }
       })
       setMesasOcupadasMap(ocupadas)
@@ -185,7 +189,6 @@ export default function PdaView() {
     }
   }
 
-  // Carga el pedido abierto existente si la mesa ya está ocupada
   const cargarPedidoMesaActual = async () => {
     try {
       const { data: mesa } = await supabase
@@ -247,7 +250,6 @@ export default function PdaView() {
     return nombresMesas[clave] || `Mesa ${num}`
   }
 
-  // Añadir ítem al pedido existente o crear pedido nuevo si la mesa está libre
   const agregarAlTicket = async (prod) => {
     try {
       let pId = pedidoIdActual
@@ -272,7 +274,6 @@ export default function PdaView() {
           if (nuevaMesa) mId = nuevaMesa.id
         }
 
-        // Verificar si ya existía un pedido abierto para evitar duplicar pedidos
         const { data: pedidoExistente } = await supabase
           .from('pedidos')
           .select('id')
@@ -295,7 +296,6 @@ export default function PdaView() {
         setPedidoIdActual(pId)
       }
 
-      // Buscar si el ítem ya existe en estado "borrador" para sumar cantidad
       const itemExistente = comandaActual.find((i) => i.nombre === prod.nombre && i.estado === 'borrador')
 
       if (itemExistente) {
@@ -334,7 +334,23 @@ export default function PdaView() {
     await cargarMesasOcupadas()
   }
 
-  // Enviar comanda: Cambia borrador -> pendiente para que las pantallas de Cocina y Barra reciban sus pedidos en tiempo real
+  // Liberar / Vaciar Mesa
+  const liberarMesa = async (pedidoId, e) => {
+    if (e) e.stopPropagation()
+    if (!pedidoId) return
+    if (!confirm('¿Liberar esta mesa y cancelar su pedido actual?')) return
+
+    try {
+      await supabase.from('lineas_pedido').delete().eq('pedido_id', pedidoId)
+      await supabase.from('pedidos').update({ estado: 'cancelado' }).eq('id', pedidoId)
+
+      await cargarPedidoMesaActual()
+      await cargarMesasOcupadas()
+    } catch (err) {
+      console.error('Error liberando mesa:', err)
+    }
+  }
+
   const enviarComandaBD = async () => {
     if (!pedidoIdActual) return
 
@@ -622,14 +638,29 @@ export default function PdaView() {
                 <span>TOTAL ACUMULADO</span>
                 <span className="text-amber-400 text-lg">{calcularTotal().toFixed(2)}€</span>
               </div>
-              <button
-                type="button"
-                onClick={enviarComandaBD}
-                disabled={!tieneBorradores || enviando}
-                className="w-full py-3.5 bg-amber-500 disabled:opacity-30 text-slate-950 font-black text-xs uppercase rounded-2xl shadow-xl active:scale-95 transition"
-              >
-                {enviando ? 'ENVIANDO...' : '🚀 ENVIAR A COCINA / BARRA'}
-              </button>
+              
+              <div className="flex gap-2">
+                {pedidoIdActual && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      liberarMesa(pedidoIdActual, e)
+                      setVerComandaMobile(false)
+                    }}
+                    className="py-3.5 px-4 bg-rose-500/20 border border-rose-500/40 text-rose-400 font-bold text-xs uppercase rounded-2xl active:scale-95 transition"
+                  >
+                    🗑️ Vaciar
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={enviarComandaBD}
+                  disabled={!tieneBorradores || enviando}
+                  className="flex-1 py-3.5 bg-amber-500 disabled:opacity-30 text-slate-950 font-black text-xs uppercase rounded-2xl shadow-xl active:scale-95 transition"
+                >
+                  {enviando ? 'ENVIANDO...' : '🚀 ENVIAR A COCINA / BARRA'}
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -675,14 +706,13 @@ export default function PdaView() {
                   const nombreVisual = obtenerNombreMesa(n)
 
                   return (
-                    <button
+                    <div
                       key={n}
-                      type="button"
                       onClick={() => {
                         setMesaNum(n)
                         setModalMesaAbierto(false)
                       }}
-                      className={`p-2 rounded-2xl border text-center flex flex-col justify-between items-center h-20 transition active:scale-95 cursor-pointer ${
+                      className={`p-2 rounded-2xl border text-center flex flex-col justify-between items-center h-20 transition active:scale-95 cursor-pointer relative ${
                         esSeleccionada
                           ? 'ring-2 ring-amber-400 bg-amber-500 text-slate-950 font-black'
                           : estaOcupada
@@ -698,14 +728,26 @@ export default function PdaView() {
                         {estaOcupada ? `${mesaInfo.total.toFixed(2)}€` : 'Libre'}
                       </span>
 
-                      <span
-                        className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-md ${
-                          estaOcupada ? 'bg-rose-600 text-white' : 'bg-emerald-600/40 text-emerald-200'
-                        }`}
-                      >
-                        {estaOcupada ? 'Ocupada' : 'Disponible'}
-                      </span>
-                    </button>
+                      <div className="flex items-center gap-1 w-full justify-center">
+                        <span
+                          className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-md ${
+                            estaOcupada ? 'bg-rose-600 text-white' : 'bg-emerald-600/40 text-emerald-200'
+                          }`}
+                        >
+                          {estaOcupada ? 'Ocupada' : 'Disponible'}
+                        </span>
+                        {estaOcupada && (
+                          <button
+                            type="button"
+                            title="Liberar Mesa"
+                            onClick={(e) => liberarMesa(mesaInfo.pedidoId, e)}
+                            className="bg-rose-900/80 hover:bg-rose-700 text-white text-[9px] p-0.5 px-1 rounded border border-rose-500/50"
+                          >
+                            🗑️
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   )
                 })}
               </div>
