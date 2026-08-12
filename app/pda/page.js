@@ -29,6 +29,7 @@ export default function PdaView() {
   const [comandaActual, setComandaActual] = useState([])
   const [pedidoIdActual, setPedidoIdActual] = useState(null)
   const [aliasActual, setAliasActual] = useState('')
+  const [enviando, setEnviando] = useState(false)
 
   // Modales UI
   const [modalMesaAbierto, setModalMesaAbierto] = useState(false)
@@ -64,7 +65,7 @@ export default function PdaView() {
     }
   }, [])
 
-  // 3. Sincronizar el pedido de la mesa activa en tiempo real
+  // 3. Sincronizar el pedido de la mesa activa en tiempo real al cambiar de zona o mesa
   useEffect(() => {
     cargarPedidoMesaActual()
 
@@ -184,6 +185,7 @@ export default function PdaView() {
     }
   }
 
+  // Carga el pedido abierto existente si la mesa ya está ocupada
   const cargarPedidoMesaActual = async () => {
     try {
       const { data: mesa } = await supabase
@@ -221,6 +223,7 @@ export default function PdaView() {
         .from('lineas_pedido')
         .select('*')
         .eq('pedido_id', pedido.id)
+        .order('id', { ascending: true })
 
       if (lineas) {
         setComandaActual(
@@ -229,7 +232,7 @@ export default function PdaView() {
             nombre: l.producto_nombre,
             precio: Number(l.precio),
             cantidad: l.cantidad,
-            destino: l.destino,
+            destino: l.destino || 'barra',
             estado: l.estado,
           }))
         )
@@ -244,13 +247,14 @@ export default function PdaView() {
     return nombresMesas[clave] || `Mesa ${num}`
   }
 
+  // Añadir ítem al pedido existente o crear pedido nuevo si la mesa está libre
   const agregarAlTicket = async (prod) => {
     try {
       let pId = pedidoIdActual
       let mId = null
 
       if (!pId) {
-        const { data: mesaBD } = await supabase
+        let { data: mesaBD } = await supabase
           .from('mesas')
           .select('id')
           .eq('numero', mesaNum)
@@ -268,18 +272,30 @@ export default function PdaView() {
           if (nuevaMesa) mId = nuevaMesa.id
         }
 
-        const { data: nuevoPedido } = await supabase
+        // Verificar si ya existía un pedido abierto para evitar duplicar pedidos
+        const { data: pedidoExistente } = await supabase
           .from('pedidos')
-          .insert([{ mesa_id: mId, estado: 'abierto', nota: aliasActual }])
-          .select()
-          .single()
+          .select('id')
+          .eq('mesa_id', mId)
+          .eq('estado', 'abierto')
+          .maybeSingle()
 
-        if (nuevoPedido) {
-          pId = nuevoPedido.id
-          setPedidoIdActual(pId)
+        if (pedidoExistente) {
+          pId = pedidoExistente.id
+        } else {
+          const { data: nuevoPedido } = await supabase
+            .from('pedidos')
+            .insert([{ mesa_id: mId, estado: 'abierto', nota: aliasActual }])
+            .select()
+            .single()
+
+          if (nuevoPedido) pId = nuevoPedido.id
         }
+
+        setPedidoIdActual(pId)
       }
 
+      // Buscar si el ítem ya existe en estado "borrador" para sumar cantidad
       const itemExistente = comandaActual.find((i) => i.nombre === prod.nombre && i.estado === 'borrador')
 
       if (itemExistente) {
@@ -300,8 +316,8 @@ export default function PdaView() {
         ])
       }
 
-      cargarPedidoMesaActual()
-      cargarMesasOcupadas()
+      await cargarPedidoMesaActual()
+      await cargarMesasOcupadas()
     } catch (err) {
       console.error('Error añadiendo ítem:', err)
     }
@@ -314,12 +330,19 @@ export default function PdaView() {
     } else {
       await supabase.from('lineas_pedido').update({ cantidad: nuevaCant }).eq('id', item.id_linea)
     }
-    cargarPedidoMesaActual()
-    cargarMesasOcupadas()
+    await cargarPedidoMesaActual()
+    await cargarMesasOcupadas()
   }
 
+  // Enviar comanda: Cambia borrador -> pendiente para que las pantallas de Cocina y Barra reciban sus pedidos en tiempo real
   const enviarComandaBD = async () => {
-    if (!pedidoIdActual || comandaActual.length === 0) return
+    if (!pedidoIdActual) return
+
+    const borradores = comandaActual.filter((i) => i.estado === 'borrador')
+    if (borradores.length === 0) return
+
+    setEnviando(true)
+
     try {
       await supabase
         .from('lineas_pedido')
@@ -335,14 +358,17 @@ export default function PdaView() {
       }
 
       setVerComandaMobile(false)
-      cargarPedidoMesaActual()
-      cargarMesasOcupadas()
+      await cargarPedidoMesaActual()
+      await cargarMesasOcupadas()
     } catch (err) {
-      alert(`❌ Error al enviar: ${err.message}`)
+      alert(`❌ Error al enviar comanda: ${err.message}`)
+    } finally {
+      setEnviando(false)
     }
   }
 
   const calcularTotal = () => comandaActual.reduce((sum, item) => sum + item.precio * item.cantidad, 0)
+  const tieneBorradores = comandaActual.some((i) => i.estado === 'borrador')
 
   const productosFiltrados = productos.filter((p) => p.familia === familiaActiva)
   const opcionesMesas = Array.from({ length: 20 }, (_, i) => i + 1)
@@ -401,7 +427,6 @@ export default function PdaView() {
   // VISTA PRINCIPAL PDA MÓVIL
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-start">
-      {/* Mapeo contenedor estilo smartphone/PDA */}
       <div className="w-full max-w-md min-h-screen flex flex-col bg-slate-950 border-x border-slate-800/50 relative pb-20">
         
         {/* HEADER SUPERIOR */}
@@ -512,10 +537,10 @@ export default function PdaView() {
           <button
             type="button"
             onClick={enviarComandaBD}
-            disabled={comandaActual.length === 0}
+            disabled={!tieneBorradores || enviando}
             className="bg-amber-500 disabled:opacity-30 text-slate-950 font-black px-4 py-3 rounded-2xl text-xs uppercase shadow-lg active:scale-95 transition cursor-pointer"
           >
-            🚀 ENVIAR
+            {enviando ? '⏳...' : '🚀 ENVIAR'}
           </button>
         </div>
 
@@ -549,28 +574,40 @@ export default function PdaView() {
                   >
                     <div className="max-w-[45%]">
                       <span className="font-bold text-xs text-slate-100 block truncate">{item.nombre}</span>
-                      <span className="text-[10px] text-slate-400">
-                        {item.precio.toFixed(2)}€/ud — <span className="uppercase text-amber-400">{item.estado}</span>
+                      <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                        {item.precio.toFixed(2)}€/ud — 
+                        <span className={`uppercase font-bold ${item.estado === 'borrador' ? 'text-amber-400' : 'text-emerald-400'}`}>
+                          {item.estado === 'borrador' ? 'Sin Enviar' : 'Enviado'}
+                        </span>
+                        <span className={`text-[8px] px-1 rounded uppercase ${item.destino === 'cocina' ? 'bg-rose-900/50 text-rose-300' : 'bg-blue-900/50 text-blue-300'}`}>
+                          {item.destino}
+                        </span>
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 p-1 rounded-xl">
-                        <button
-                          type="button"
-                          onClick={() => cambiarCantidad(item, -1)}
-                          className="w-6 h-6 bg-rose-500/20 text-rose-400 font-black rounded-lg text-xs flex items-center justify-center active:scale-90"
-                        >
-                          -
-                        </button>
-                        <span className="font-black text-xs px-1">{item.cantidad}</span>
-                        <button
-                          type="button"
-                          onClick={() => cambiarCantidad(item, 1)}
-                          className="w-6 h-6 bg-emerald-500/20 text-emerald-400 font-black rounded-lg text-xs flex items-center justify-center active:scale-90"
-                        >
-                          +
-                        </button>
-                      </div>
+                      {item.estado === 'borrador' ? (
+                        <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 p-1 rounded-xl">
+                          <button
+                            type="button"
+                            onClick={() => cambiarCantidad(item, -1)}
+                            className="w-6 h-6 bg-rose-500/20 text-rose-400 font-black rounded-lg text-xs flex items-center justify-center active:scale-90"
+                          >
+                            -
+                          </button>
+                          <span className="font-black text-xs px-1">{item.cantidad}</span>
+                          <button
+                            type="button"
+                            onClick={() => cambiarCantidad(item, 1)}
+                            className="w-6 h-6 bg-emerald-500/20 text-emerald-400 font-black rounded-lg text-xs flex items-center justify-center active:scale-90"
+                          >
+                            +
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-xs font-bold text-slate-400 px-2 py-1 bg-slate-950 rounded-lg">
+                          x{item.cantidad}
+                        </span>
+                      )}
                       <span className="font-black text-xs text-amber-400 w-12 text-right">
                         {(item.precio * item.cantidad).toFixed(2)}€
                       </span>
@@ -588,10 +625,10 @@ export default function PdaView() {
               <button
                 type="button"
                 onClick={enviarComandaBD}
-                disabled={comandaActual.length === 0}
+                disabled={!tieneBorradores || enviando}
                 className="w-full py-3.5 bg-amber-500 disabled:opacity-30 text-slate-950 font-black text-xs uppercase rounded-2xl shadow-xl active:scale-95 transition"
               >
-                🚀 ENVIAR A COCINA / BARRA
+                {enviando ? 'ENVIANDO...' : '🚀 ENVIAR A COCINA / BARRA'}
               </button>
             </div>
           </div>
