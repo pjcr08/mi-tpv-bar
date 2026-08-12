@@ -1,32 +1,18 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 
 export default function ComandasBarra() {
   const [comandas, setComandas] = useState([])
+  const [cargando, setCargando] = useState(true)
+  const [errorBD, setErrorBD] = useState(null)
 
-  useEffect(() => {
-    cargarComandas()
-
-    // Suscripción en tiempo real
-    const channel = supabase
-      .channel('comandas-barra-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'lineas_pedido' }, () => {
-        cargarComandas()
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, () => {
-        cargarComandas()
-      })
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [])
-
-  const cargarComandas = async () => {
+  const cargarComandas = useCallback(async () => {
     try {
+      setErrorBD(null)
+
+      // Consultar pedidos abiertos
       const { data, error } = await supabase
         .from('pedidos')
         .select(`
@@ -39,28 +25,41 @@ export default function ComandasBarra() {
         .eq('estado', 'abierto')
         .order('created_at', { ascending: true })
 
-      if (error) throw error
+      if (error) {
+        console.error('Error Supabase al cargar comandas:', error)
+        setErrorBD(error.message)
+        return
+      }
 
-      // Agrupar pedidos que tengan productos pendientes para BARRA
-      const comandasProcesadas = (data || [])
+      if (!data) {
+        setComandas([])
+        return
+      }
+
+      // Filtrar y mapear únicamente productos de BARRA pendientes
+      const comandasProcesadas = data
         .map((pedido) => {
-          const lineasBarra = (pedido.lineas_pedido || []).filter(
-            (l) => l.destino === 'barra' && l.estado === 'pendiente'
-          )
+          const lineasBarra = (pedido.lineas_pedido || []).filter((l) => {
+            const esBarra = String(l.destino || '').toLowerCase() === 'barra'
+            const esPendiente = String(l.estado || '').toLowerCase() === 'pendiente'
+            return esBarra && esPendiente
+          })
 
           if (lineasBarra.length === 0) return null
 
-          // Nombre de la mesa (custom o predeterminado)
+          // Formato de nombre de mesa
           const zona = pedido.mesas?.zona || 'Sin Zona'
           const num = pedido.mesas?.numero || ''
           const custom = pedido.mesas?.nombre_custom
           const nombreMesa = custom ? custom : `Mesa ${num}`
 
-          // Formatear hora (HH:MM)
-          const hora = new Date(pedido.created_at).toLocaleTimeString([], {
-            hour: '2-digit',
-            minute: '2-digit',
-          })
+          // Formato de hora (HH:MM)
+          const hora = pedido.created_at
+            ? new Date(pedido.created_at).toLocaleTimeString([], {
+                hour: '2-digit',
+                minute: '2-digit',
+              })
+            : '--:--'
 
           return {
             pedidoId: pedido.id,
@@ -75,18 +74,45 @@ export default function ComandasBarra() {
 
       setComandas(comandasProcesadas)
     } catch (err) {
-      console.error('Error cargando comandas de barra:', err)
+      console.error('Error de red/servidor:', err)
+      setErrorBD(err.message || 'Error desconocido al conectar con la base de datos')
+    } finally {
+      setCargando(false)
     }
-  }
+  }, [])
+
+  useEffect(() => {
+    cargarComandas()
+
+    // Suscripción Realtime optimizada
+    const channel = supabase
+      .channel('comandas-barra-channel')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'lineas_pedido' }, () => {
+        cargarComandas()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, () => {
+        cargarComandas()
+      })
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [cargarComandas])
 
   const marcarLineaServida = async (lineaId) => {
     try {
-      await supabase
+      const { error } = await supabase
         .from('lineas_pedido')
         .update({ estado: 'servido' })
         .eq('id', lineaId)
 
-      cargarComandas()
+      if (error) {
+        alert(`Error al cambiar estado: ${error.message}`)
+        return
+      }
+
+      await cargarComandas()
     } catch (err) {
       console.error('Error al marcar linea servida:', err)
     }
@@ -95,30 +121,41 @@ export default function ComandasBarra() {
   const servirTodoElPedido = async (lineas) => {
     try {
       const ids = lineas.map((l) => l.id)
-      await supabase
+      const { error } = await supabase
         .from('lineas_pedido')
         .update({ estado: 'servido' })
         .in('id', ids)
 
-      cargarComandas()
+      if (error) {
+        alert(`Error al servir comandas: ${error.message}`)
+        return
+      }
+
+      await cargarComandas()
     } catch (err) {
       console.error('Error al servir todo el pedido:', err)
     }
   }
 
   const borrarPedidoComanda = async (pedidoId) => {
+    if (!confirm('¿Seguro que deseas anular estas bebidas?')) return
+
     try {
-      // Cancelar las líneas pertenecientes a la barra de este pedido
       const comandaActual = comandas.find((c) => c.pedidoId === pedidoId)
       if (!comandaActual) return
 
       const ids = comandaActual.lineas.map((l) => l.id)
-      await supabase
+      const { error } = await supabase
         .from('lineas_pedido')
         .update({ estado: 'cancelado' })
         .in('id', ids)
 
-      cargarComandas()
+      if (error) {
+        alert(`Error al anular comanda: ${error.message}`)
+        return
+      }
+
+      await cargarComandas()
     } catch (err) {
       console.error('Error al borrar comanda:', err)
     }
@@ -127,20 +164,41 @@ export default function ComandasBarra() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-6 font-sans select-none">
       {/* ENCABEZADO */}
-      <header className="mb-6 flex items-center gap-3 border-b border-slate-800 pb-4">
-        <span className="text-3xl">🍹</span>
-        <div>
-          <h1 className="text-2xl font-black tracking-wider text-cyan-400 uppercase">
-            COMANDAS DE BARRA
-          </h1>
-          <p className="text-xs text-slate-400 font-semibold">
-            Bebidas y tragos pendientes
-          </p>
+      <header className="mb-6 flex justify-between items-center border-b border-slate-800 pb-4">
+        <div className="flex items-center gap-3">
+          <span className="text-3xl">🍹</span>
+          <div>
+            <h1 className="text-2xl font-black tracking-wider text-cyan-400 uppercase">
+              COMANDAS DE BARRA
+            </h1>
+            <p className="text-xs text-slate-400 font-semibold">
+              Bebidas y tragos pendientes en tiempo real
+            </p>
+          </div>
         </div>
+
+        <button
+          onClick={cargarComandas}
+          className="bg-slate-900 hover:bg-slate-800 text-cyan-400 border border-slate-800 font-bold px-3 py-1.5 rounded-xl text-xs transition active:scale-95"
+        >
+          🔄 Refrescar
+        </button>
       </header>
 
-      {/* GRID DE CARDS DE COMANDAS */}
-      {comandas.length === 0 ? (
+      {/* MENSAJE DE ERROR BD SI EXISTE */}
+      {errorBD && (
+        <div className="mb-6 p-4 bg-rose-500/10 border border-rose-500/30 text-rose-400 rounded-xl text-xs font-mono">
+          🚨 <strong>Error de lectura Supabase:</strong> {errorBD}
+        </div>
+      )}
+
+      {/* ESTADO CARGANDO */}
+      {cargando ? (
+        <div className="flex justify-center py-24 text-slate-500 text-sm font-bold">
+          Cargando comandas de barra...
+        </div>
+      ) : comandas.length === 0 ? (
+        /* ESTADO VACÍO */
         <div className="flex flex-col items-center justify-center py-24 text-slate-600">
           <span className="text-5xl mb-2">✨</span>
           <p className="text-sm font-bold uppercase tracking-widest">
@@ -148,20 +206,19 @@ export default function ComandasBarra() {
           </p>
         </div>
       ) : (
+        /* GRID DE COMANDAS */
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {comandas.map((cmd) => (
             <div
               key={cmd.pedidoId}
               className="bg-slate-900 border-2 border-cyan-500/50 rounded-2xl p-4 shadow-xl flex flex-col justify-between gap-3"
             >
-              {/* CABECERA DE LA CARD DE COMANDA */}
               <div>
                 <div className="flex justify-between items-start border-b border-slate-800 pb-2">
                   <div>
                     <h2 className="text-base font-black text-cyan-400 uppercase tracking-wide">
                       {cmd.zona} - {cmd.mesa}
                     </h2>
-                    {/* ALIAS / NOTA DE CLIENTE */}
                     {cmd.alias && (
                       <span className="inline-block mt-1 bg-cyan-500/10 text-cyan-300 font-extrabold text-xs px-2 py-0.5 rounded-md border border-cyan-500/30">
                         👤 {cmd.alias}
@@ -174,7 +231,6 @@ export default function ComandasBarra() {
                   </span>
                 </div>
 
-                {/* LISTA DE LÍNEAS DE PEDIDO */}
                 <div className="space-y-2 mt-3">
                   {cmd.lineas.map((linea) => (
                     <div
@@ -200,7 +256,6 @@ export default function ComandasBarra() {
                 </div>
               </div>
 
-              {/* BOTONERA INFERIOR */}
               <div className="flex gap-2 pt-2 border-t border-slate-800">
                 <button
                   onClick={() => servirTodoElPedido(cmd.lineas)}
